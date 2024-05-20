@@ -92,7 +92,7 @@ int main(void)
     printf("Key to find: %d\n", val);
     printf("\n");
 
-    for (int i = 0; i < ARRAY_SIZE; i++)
+    for (int i = 0; i < 4; i++)
     {
         int index;
         double startTime, endTime;
