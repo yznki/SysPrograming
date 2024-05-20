@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-#define ARRAY_SIZE 100
+#define ARRAY_SIZE 1000
 
 void dispArray(int arr[], int arrSize);
 
