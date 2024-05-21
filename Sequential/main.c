@@ -12,6 +12,7 @@
 #include <openssl/sha.h>
 #include "../Common/searchSortAlgos.h"
 #include "../Common/utilities.h"
+#include "../Common/hashing.h"
 
 int main(void)
 {
@@ -22,6 +23,7 @@ int main(void)
     // Hashing
     printf("****** Hashing Service ******\n\n");
     serviceStartTime = clock();
+    hashing("sample.txt", "output.txt");
     serviceEndTime = clock();
     printf("Hashing Service Time\t%lf Seconds", (serviceEndTime - serviceStartTime) / CLOCKS_PER_SEC);
 

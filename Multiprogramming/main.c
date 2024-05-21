@@ -12,10 +12,11 @@
 #include <openssl/sha.h>
 #include "../Common/searchSortAlgos.h"
 #include "../Common/utilities.h"
+#include "../Common/hashing.h"
 
 int main(void)
 {
-    system("clear");
+    // system("clear");
     double processStartTime = clock();
     srand(time(NULL));
     int servicesPID = fork();
@@ -25,13 +26,16 @@ int main(void)
         // Hashing
         printf("****** Hashing Service ******\n\n");
         double serviceStartTime = clock();
+        hashing("sample.txt", "output.txt");
         double serviceEndTime = clock();
         printf("Hashing Service Time\t%lf Seconds", (serviceEndTime - serviceStartTime) / CLOCKS_PER_SEC);
 
         printf("\n\n");
+        exit(0);
     }
     else if (servicesPID > 0)
     {
+        waitpid(servicesPID, NULL, 0);
         // Sorting & Searching
 
         int searchSortFD[2];
@@ -240,7 +244,7 @@ int main(void)
             double serviceEndTime = clock();
             printf("Sort & Search Time\t%lf Seconds\n", (serviceEndTime - serviceStartTime) / CLOCKS_PER_SEC);
 
-            printf("\n\n");
+            printf("\n");
             double processEndTime = clock();
             printf("Process Total Time\t%lf Seconds", (processEndTime - processStartTime) / CLOCKS_PER_SEC);
             printf("\n\n\n");
