@@ -16,7 +16,7 @@
 
 int main(void)
 {
-    // system("clear");
+    system("clear");
     double processStartTime = clock();
     srand(time(NULL));
     int servicesPID = fork();
@@ -237,12 +237,11 @@ int main(void)
         {
             // Parent
             double serviceStartTime = clock();
+
             waitpid(searchSortPID,NULL,0);
             
-            printf("\n");
-            
             double serviceEndTime = clock();
-            printf("Sort & Search Time\t%lf Seconds\n", (serviceEndTime - serviceStartTime) / CLOCKS_PER_SEC);
+            printf("\nSort & Search Time\t%lf Seconds\n", (serviceEndTime - serviceStartTime) / CLOCKS_PER_SEC);
 
             printf("\n");
             double processEndTime = clock();

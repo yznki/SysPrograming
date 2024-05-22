@@ -9,7 +9,7 @@
 
 
     "code-runner.executorMap": {
-        "c": "cd $dir && gcc $fileName -o $fileNameWithoutExt.o ../Common/searchSortAlgos.c ../Common/hashing.c ../Common/utilities.c -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto && $dir$fileNameWithoutExt.o"
+        "c": "cd $dir && gcc $fileName -o $fileNameWithoutExt.o ../Common/searchSortAlgos.c ../Common/utilities.c -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto && $dir$fileNameWithoutExt.o"
     }
 
 }

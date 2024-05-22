@@ -9,15 +9,14 @@
 
 void hashing(const char *src, const char *dest)
 {
-
     unsigned char sha256_digest[SHA256_DIGEST_LENGTH];
     unsigned char *buffer;
     unsigned char *temp_buffer;
     int sourceFile = open(src, O_RDONLY);
     if (sourceFile < 0)
     {
-        perror("open");
-        return;
+        perror("Error opening source file");
+        exit(1); // Exit with specific failure status for file not found
     }
 
     int buffer_size = 1024; // Initial buffer size
@@ -27,9 +26,9 @@ void hashing(const char *src, const char *dest)
     buffer = malloc(buffer_size * sizeof(unsigned char));
     if (buffer == NULL)
     {
-        perror("malloc");
+        perror("Error allocating memory");
         close(sourceFile);
-        return;
+        exit(2); // Exit with specific failure status for memory allocation error
     }
 
     while ((bytes_read = read(sourceFile, buffer + total_bytes_read, buffer_size - total_bytes_read)) > 0)
@@ -41,10 +40,10 @@ void hashing(const char *src, const char *dest)
             temp_buffer = realloc(buffer, buffer_size);
             if (temp_buffer == NULL)
             {
-                perror("realloc");
+                perror("Error reallocating memory");
                 free(buffer);
                 close(sourceFile);
-                return;
+                exit(2); // Exit with specific failure status for memory allocation error
             }
             buffer = temp_buffer;
         }
@@ -52,10 +51,10 @@ void hashing(const char *src, const char *dest)
 
     if (bytes_read < 0)
     {
-        perror("read");
+        perror("Error reading source file");
         free(buffer);
         close(sourceFile);
-        return;
+        exit(3); // Exit with specific failure status for read error
     }
 
     SHA256(buffer, total_bytes_read, sha256_digest);
@@ -71,15 +70,34 @@ void hashing(const char *src, const char *dest)
     int destinationFile = open(dest, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (destinationFile < 0)
     {
-        perror("open");
+        perror("Error opening destination file");
         free(buffer);
         close(sourceFile);
-        return;
+        exit(4); // Exit with specific failure status for destination file error
     }
 
-    write(destinationFile, hex_output, strlen(hex_output));
+    if (write(destinationFile, hex_output, strlen(hex_output)) < 0)
+    {
+        perror("Error writing to destination file");
+        free(buffer);
+        close(sourceFile);
+        close(destinationFile);
+        exit(5); // Exit with specific failure status for write error
+    }
 
     free(buffer);
     close(sourceFile);
     close(destinationFile);
-};
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 3)
+    {
+        fprintf(stderr, "Usage: %s <source file> <destination file>\n", argv[0]);
+        return 1;
+    }
+
+    hashing(argv[1], argv[2]);
+    return 0;
+}

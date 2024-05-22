@@ -3,7 +3,10 @@
 
 #include <stdio.h>
 
-#define ARRAY_SIZE 1000
+#define ARRAY_SIZE 10000
+#define HASH_PORT 1234
+#define SORT_SEARCH_PORT 5432
+
 
 void dispArray(int arr[], int arrSize);
 
