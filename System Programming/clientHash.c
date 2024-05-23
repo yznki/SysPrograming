@@ -13,11 +13,20 @@
 
 #define BUFFER_SIZE 1024
 
-void send_file_for_hash(const char *filename)
+void sendFileForHash(const char *filename)
 {
     int sock;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE] = {0};
+    int file_fd;
+
+    // Open the file
+    file_fd = open(filename, O_RDONLY);
+    if (file_fd < 0)
+    {
+        perror("Error opening file");
+        return;
+    }
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
@@ -36,15 +45,30 @@ void send_file_for_hash(const char *filename)
         return;
     }
 
-    // Send the request type and filename in one go
-    snprintf(buffer, BUFFER_SIZE, "hash\n%s\n", filename);
+    // Send the filename first
+    snprintf(buffer, BUFFER_SIZE, "%s\n", filename);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
-        perror("Error writing request to socket");
+        perror("Error writing filename to socket");
+        close(file_fd);
         close(sock);
         return;
     }
-    printf("Sent request: %s\n", buffer); // Debug statement
+
+    // Send the file contents
+    ssize_t bytes_read;
+    while ((bytes_read = read(file_fd, buffer, BUFFER_SIZE)) > 0)
+    {
+        if (write(sock, buffer, bytes_read) < 0)
+        {
+            perror("Error writing file to socket");
+            close(file_fd);
+            close(sock);
+            return;
+        }
+    }
+    close(file_fd);
+    shutdown(sock, SHUT_WR);
 
     // Receive the hash from the server
     int valread = read(sock, buffer, BUFFER_SIZE - 1);
@@ -75,6 +99,6 @@ int main()
     // Remove newline character if present
     filename[strcspn(filename, "\n")] = '\0';
 
-    send_file_for_hash(filename);
+    sendFileForHash(filename);
     return 0;
 }

@@ -85,6 +85,13 @@ Sequential/
 ## Running the Simulator
 To run the simulator, execute the compiled binaries from the `Multiprogramming` or `Sequential` directories depending on the implementation you want to test.
 
+## To Compile Everything
+```sh
+gcc ../Common/hashing.c -o ../Common/hashing.o -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto
+gcc server.c -o server.o ../Common/searchSortAlgos.c ../Common/utilities.c -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto -lpthread
+gcc clientHash.c -o clientHash.o -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto
+```
+
 ## Future Work
 - **Multithreading:** Implement multithreaded versions of the services to handle more clients simultaneously.
 - **Enhancements:** Add more algorithms and optimize the existing ones for better performance.

@@ -27,6 +27,7 @@ typedef struct
 HashCache hashCache[CACHE_SIZE];
 int hashCacheSize = 0;
 pthread_mutex_t cacheLock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t hashLock = PTHREAD_MUTEX_INITIALIZER;
 
 int findHash(const char *filename, char *hash)
 {
@@ -68,6 +69,8 @@ void computeHash(const char *filename, char *hash)
     char dest_file[] = "hash_output.txt";
     pid_t pid;
 
+    pthread_mutex_lock(&hashLock);
+
     pid = fork();
 
     if (pid == 0)
@@ -94,6 +97,7 @@ void computeHash(const char *filename, char *hash)
                 {
                     perror("open dest_file");
                     strcpy(hash, "ERROR: FILE NOT FOUND");
+                    pthread_mutex_unlock(&hashLock);
                     return;
                 }
 
@@ -103,6 +107,7 @@ void computeHash(const char *filename, char *hash)
                     perror("read");
                     strcpy(hash, "ERROR: FILE READ ERROR");
                     close(dest_fd);
+                    pthread_mutex_unlock(&hashLock);
                     return;
                 }
                 hash[bytesRead] = '\0';
@@ -121,66 +126,65 @@ void computeHash(const char *filename, char *hash)
         {
             strcpy(hash, "ERROR: HASH COMPUTATION FAILED");
         }
+        remove("hash_output.txt");
     }
     else
     {
         perror("fork");
         strcpy(hash, "ERROR: FORK FAILED");
     }
+    pthread_mutex_unlock(&hashLock);
 }
 
 void handleClientSortSearch(int clientSocket, const char *filename) {}
 
-void *handle_client(void *sock)
+void *handleClient(void *arg)
 {
-    int client_sock = *(int *)sock;
-    free(sock);
+    int client_sock = *(int *)arg;
+    free(arg);
+
     char buffer[BUFFER_SIZE];
-
-    int bytes_received = recv(client_sock, buffer, BUFFER_SIZE - 1, 0);
-    if (bytes_received < 0)
+    int read_size = read(client_sock, buffer, BUFFER_SIZE - 1);
+    if (read_size <= 0)
     {
-        perror("recv");
         close(client_sock);
         return NULL;
     }
-    buffer[bytes_received] = '\0';
+    buffer[read_size] = '\0'; // Null-terminate the string
 
-    char *request_type = strtok(buffer, "\n");
-    char *filename = strtok(NULL, "\n");
-    if (request_type == NULL || filename == NULL)
+    // Extract the filename from the received data
+    char filename[256];
+    sscanf(buffer, "%s", filename);
+
+    // Create a temporary file to store the received file contents
+    char temp_filename[] = "/tmp/tempfileXXXXXX";
+    int temp_fd = mkstemp(temp_filename);
+    if (temp_fd == -1)
     {
-        printf("Invalid request\n");
+        perror("Error creating temporary file");
         close(client_sock);
         return NULL;
     }
 
-    if (strcmp(request_type, "hash") == 0)
-    {
-        char hash[SHA256_DIGEST_LENGTH * 2 + 1];
-        if (findHash(filename, hash))
-        {
-            send(client_sock, hash, strlen(hash), 0);
-        }
-        else
-        {
-            computeHash(filename, hash);
-            addHash(filename, hash);
-            send(client_sock, hash, strlen(hash), 0);
-        }
-    }
-    else if (strcmp(request_type, "sortsearch") == 0)
-    {
-        printf("Handling sortsearch request\n");
-        handleClientSortSearch(client_sock, filename);
-    }
-    else
-    {
-        printf("Unknown request type: %s\n", request_type);
-        char error_message[] = "ERROR: Unknown request type\n";
-        send(client_sock, error_message, strlen(error_message), 0);
-    }
+    // Write the remaining data to the temporary file
+    write(temp_fd, buffer + strlen(filename) + 1, read_size - strlen(filename) - 1);
 
+    // Continue receiving the file contents
+    while ((read_size = read(client_sock, buffer, BUFFER_SIZE)) > 0)
+    {
+        write(temp_fd, buffer, read_size);
+    }
+    close(temp_fd);
+
+    // Compute the hash
+    char hash[SHA256_DIGEST_LENGTH * 2 + 1];
+    computeHash(temp_filename, hash);
+
+    // Send the hash to the client
+    write(client_sock, hash, strlen(hash));
+
+    // Clean up
+    remove(temp_filename);
     close(client_sock);
     return NULL;
 }
@@ -230,7 +234,7 @@ void runServer(int port)
         printf("Accepted new connection\n");
 
         pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, handle_client, (void *)new_sock) != 0)
+        if (pthread_create(&thread_id, NULL, handleClient, (void *)new_sock) != 0)
         {
             perror("pthread_create");
             free(new_sock);

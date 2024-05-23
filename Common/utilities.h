@@ -4,8 +4,8 @@
 #include <stdio.h>
 
 #define ARRAY_SIZE 10000
-#define HASH_PORT 1234
-#define SORT_SEARCH_PORT 5432
+#define HASH_PORT 8080
+#define SORT_SEARCH_PORT 9090
 
 
 void dispArray(int arr[], int arrSize);

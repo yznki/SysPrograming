@@ -28,7 +28,7 @@ void hashing(const char *src, const char *dest)
     {
         perror("Error allocating memory");
         close(sourceFile);
-        exit(2); // Exit with specific failure status for memory allocation error
+        exit(2); // Memory Allocation Error
     }
 
     while ((bytes_read = read(sourceFile, buffer + total_bytes_read, buffer_size - total_bytes_read)) > 0)
@@ -43,7 +43,7 @@ void hashing(const char *src, const char *dest)
                 perror("Error reallocating memory");
                 free(buffer);
                 close(sourceFile);
-                exit(2); // Exit with specific failure status for memory allocation error
+                exit(2); // Memory Allocation Error
             }
             buffer = temp_buffer;
         }
@@ -54,7 +54,7 @@ void hashing(const char *src, const char *dest)
         perror("Error reading source file");
         free(buffer);
         close(sourceFile);
-        exit(3); // Exit with specific failure status for read error
+        exit(3); // File Reading Error
     }
 
     SHA256(buffer, total_bytes_read, sha256_digest);
@@ -73,7 +73,7 @@ void hashing(const char *src, const char *dest)
         perror("Error opening destination file");
         free(buffer);
         close(sourceFile);
-        exit(4); // Exit with specific failure status for destination file error
+        exit(4); // File Opening Error
     }
 
     if (write(destinationFile, hex_output, strlen(hex_output)) < 0)
@@ -82,7 +82,7 @@ void hashing(const char *src, const char *dest)
         free(buffer);
         close(sourceFile);
         close(destinationFile);
-        exit(5); // Exit with specific failure status for write error
+        exit(5); // File Writing Error
     }
 
     free(buffer);
