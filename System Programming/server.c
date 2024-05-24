@@ -136,56 +136,78 @@ void computeHash(const char *filename, char *hash)
     pthread_mutex_unlock(&hashLock);
 }
 
+void handleHashRequest(int clientSocket, const char *filename)
+{
+    char hash[SHA256_DIGEST_LENGTH * 2 + 1];
+
+    if (findHash(filename, hash))
+    {
+        // Send the cached hash to the client
+        write(clientSocket, hash, strlen(hash));
+        printf("Hash found in cache.\n");
+    }
+    else
+    {
+        // Compute the hash and send it to the client
+        computeHash(filename, hash);
+        addHash(filename, hash);
+        write(clientSocket, hash, strlen(hash));
+        printf("Hash computed and saved.\n");
+    }
+}
+
 void handleClientSortSearch(int clientSocket, const char *filename) {}
 
-void *handleClient(void *arg)
+void *handleClient(void *args)
 {
-    int client_sock = *(int *)arg;
-    free(arg);
-
+    int clientSocket = *((int *)args);
+    free(args);
     char buffer[BUFFER_SIZE];
-    int read_size = read(client_sock, buffer, BUFFER_SIZE - 1);
-    if (read_size <= 0)
+    ssize_t bytesRead;
+
+    // Read the request from the client
+    bytesRead = read(clientSocket, buffer, BUFFER_SIZE - 1);
+    if (bytesRead < 0)
     {
-        close(client_sock);
+        perror("Error reading from socket");
+        close(clientSocket);
         return NULL;
     }
-    buffer[read_size] = '\0'; // Null-terminate the string
+    buffer[bytesRead] = '\0'; // Null-terminate the buffer
 
-    // Extract the filename from the received data
-    char filename[256];
-    sscanf(buffer, "%s", filename);
+    // Parse the command keyword
+    char *command = strtok(buffer, "\n");
+    char *filename = strtok(NULL, "\n");
 
-    // Create a temporary file to store the received file contents
-    char temp_filename[] = "/tmp/tempfileXXXXXX";
-    int temp_fd = mkstemp(temp_filename);
-    if (temp_fd == -1)
+    if (command == NULL)
     {
-        perror("Error creating temporary file");
-        close(client_sock);
+        fprintf(stderr, "Invalid request format\n");
+        close(clientSocket);
         return NULL;
     }
 
-    // Write the remaining data to the temporary file
-    write(temp_fd, buffer + strlen(filename) + 1, read_size - strlen(filename) - 1);
 
-    // Continue receiving the file contents
-    while ((read_size = read(client_sock, buffer, BUFFER_SIZE)) > 0)
+    // Handle the command
+    if (strcmp(command, "HASH") == 0)
     {
-        write(temp_fd, buffer, read_size);
+        handleHashRequest(clientSocket, filename);
     }
-    close(temp_fd);
+    else if (strcmp(command, "SORTSEARCH") == 0)
+    {
+        // handleSortSearchRequest(clientSocket, buffer + strlen(command) + 1);
+    }
+    else
+    {
+        fprintf(stderr, "Unknown command: %s\n", command);
+        
+        // // Send an error response to the client
+        // const char *errorResponse = "ERROR: Unknown command\n";
+        // write(clientSocket, errorResponse, strlen(errorResponse));
+    }
 
-    // Compute the hash
-    char hash[SHA256_DIGEST_LENGTH * 2 + 1];
-    computeHash(temp_filename, hash);
+    // Close the client socket
+    close(clientSocket);
 
-    // Send the hash to the client
-    write(client_sock, hash, strlen(hash));
-
-    // Clean up
-    remove(temp_filename);
-    close(client_sock);
     return NULL;
 }
 

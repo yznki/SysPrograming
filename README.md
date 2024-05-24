@@ -88,8 +88,8 @@ To run the simulator, execute the compiled binaries from the `Multiprogramming` 
 ## To Compile Everything
 ```sh
 gcc ../Common/hashing.c -o ../Common/hashing.o -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto
-gcc server.c -o server.o ../Common/searchSortAlgos.c ../Common/utilities.c -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto -lpthread
-gcc clientHash.c -o clientHash.o -I$(brew --prefix openssl)/include -L$(brew --prefix openssl)/lib -lssl -lcrypto
+gcc $(pkg-config --cflags --libs openssl) server.c -o server.o
+gcc $(pkg-config --cflags --libs openssl) client.c -o client.o
 ```
 
 ## Future Work

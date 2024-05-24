@@ -13,7 +13,10 @@
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c17",
             "cppStandard": "c++17",
-            "intelliSenseMode": "macos-clang-arm64"
+            "intelliSenseMode": "macos-clang-arm64",
+            "compilerArgs": [
+                "$(pkg-config --cflags --libs openssl)"
+            ]
         }
     ],
     "version": 4

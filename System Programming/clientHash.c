@@ -46,7 +46,8 @@ void sendFileForHash(const char *filename)
     }
 
     // Send the filename first
-    snprintf(buffer, BUFFER_SIZE, "%s\n", filename);
+    snprintf(buffer, BUFFER_SIZE, "HASH\n%s\n", filename);
+    printf("Sending buffer: %s\n", buffer);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
         perror("Error writing filename to socket");
