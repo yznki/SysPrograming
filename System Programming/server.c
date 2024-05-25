@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <sys/stat.h>
 #include <openssl/sha.h>
 #include "../Common/searchSortAlgos.h"
 #include "../Common/utilities.h"
@@ -66,7 +67,7 @@ void addHash(const char *filename, const char *hash)
 
 void computeHash(const char *filename, char *hash)
 {
-    char dest_file[] = "hash_output.txt";
+    char dest_file[] = "hashOutput.txt";
     pid_t pid;
 
     pthread_mutex_lock(&hashLock);
@@ -92,8 +93,8 @@ void computeHash(const char *filename, char *hash)
         {
             if (WEXITSTATUS(status) == 0)
             {
-                int dest_fd = open(dest_file, O_RDONLY);
-                if (dest_fd < 0)
+                int destinationFD = open(dest_file, O_RDONLY);
+                if (destinationFD < 0)
                 {
                     perror("open dest_file");
                     strcpy(hash, "ERROR: FILE NOT FOUND");
@@ -101,17 +102,17 @@ void computeHash(const char *filename, char *hash)
                     return;
                 }
 
-                int bytesRead = read(dest_fd, hash, SHA256_DIGEST_LENGTH * 2);
+                int bytesRead = read(destinationFD, hash, SHA256_DIGEST_LENGTH * 2);
                 if (bytesRead < 0)
                 {
                     perror("read");
                     strcpy(hash, "ERROR: FILE READ ERROR");
-                    close(dest_fd);
+                    close(destinationFD);
                     pthread_mutex_unlock(&hashLock);
                     return;
                 }
                 hash[bytesRead] = '\0';
-                close(dest_fd);
+                close(destinationFD);
             }
             else if (WEXITSTATUS(status) == 1)
             {
@@ -156,7 +157,154 @@ void handleHashRequest(int clientSocket, const char *filename)
     }
 }
 
-void handleClientSortSearch(int clientSocket, const char *filename) {}
+void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind)
+{
+    int fileFD;
+    char *token;
+    ssize_t bytes_read;
+    char buffer[BUFFER_SIZE];
+    size_t current_size = 1024; // Initial Size to start buffering
+    size_t arrSize = 0;
+    int *array = NULL;
+
+    fileFD = open(filename, O_RDONLY);
+    if (fileFD < 0)
+    {
+        perror("Error opening file");
+        return;
+    }
+
+    array = (int *)malloc(current_size * sizeof(int));
+    if (!array)
+    {
+        perror("Error allocating memory for array");
+        close(fileFD);
+        return;
+    }
+    // Read the file contents and parse integers
+    while ((bytes_read = read(fileFD, buffer, BUFFER_SIZE - 1)) > 0)
+    {
+        buffer[bytes_read] = '\0'; // Null-terminate the buffer
+        token = strtok(buffer, " \n");
+        while (token != NULL)
+        {
+            if (arrSize >= current_size)
+            {
+                current_size *= 2;
+                array = (int *)realloc(array, current_size * sizeof(int));
+                if (!array)
+                {
+                    perror("Error reallocating memory for array");
+                    close(fileFD);
+                    return;
+                }
+            }
+            array[arrSize++] = atoi(token);
+            token = strtok(NULL, " \n");
+        }
+    }
+
+    if (bytes_read < 0)
+    {
+        perror("Error reading file");
+        free(array);
+        close(fileFD);
+        return;
+    }
+
+    close(fileFD);
+    dispArray(array, arrSize);
+    write(clientSocket, &arrSize, sizeof(int));
+    read(clientSocket, NULL, 0);
+
+    int fd[2];
+    if (pipe(fd))
+    {
+        perror("Unable to create pipe...\n");
+        return;
+    }
+
+    int pid = fork();
+
+    if (pid == 0)
+    {
+        // Sorting
+        switch (sortAlgo)
+        {
+        case 1:
+            bubbleSort(array, arrSize);
+            write(fd[1], array, sizeof(int) * arrSize);
+            break;
+        case 2:
+            selectionSort(array, arrSize);
+            write(fd[1], array, sizeof(int) * arrSize);
+            break;
+        case 3:
+            mergeSort(array, 0, arrSize - 1);
+            write(fd[1], array, sizeof(int) * arrSize);
+            break;
+        case 4:
+            quickSort(array, 0, arrSize - 1);
+            write(fd[1], array, sizeof(int) * arrSize);
+            break;
+        case 5:
+            // Code for multithreading of all sorting algos together.
+            break;
+
+        default:
+            break;
+        }
+        write(clientSocket, array, sizeof(int) * arrSize);
+        printf("Sorted Array\n");
+        dispArray(array, arrSize);
+    }
+    else if (pid > 0)
+    {
+        // Searching
+        int *sortedArray = malloc(sizeof(int) * arrSize);
+        read(fd[0], sortedArray, sizeof(int) * arrSize);
+        read(clientSocket, NULL, 0);
+
+        int indexOfKey;
+
+        switch (searchAlgo)
+        {
+        case 1:
+            indexOfKey = linearSearch(array, arrSize, keyToFind);
+            write(clientSocket, &indexOfKey, sizeof(int));
+            break;
+        case 2:
+            wait(NULL);
+            indexOfKey = binarySearch(sortedArray, arrSize, keyToFind);
+            write(clientSocket, &indexOfKey, sizeof(int));
+            break;
+        case 3:
+            wait(NULL);
+            indexOfKey = jumpSearch(sortedArray, arrSize, keyToFind);
+            write(clientSocket, &indexOfKey, sizeof(int));
+            break;
+        case 4:
+            wait(NULL);
+            indexOfKey = interpolationSearch(sortedArray, arrSize, keyToFind);
+            write(clientSocket, &indexOfKey, sizeof(int));
+            break;
+        case 5:
+            wait(NULL);
+            // Code for multithreading of all searching algos together.
+            break;
+
+        default:
+            break;
+        }
+
+        printf("Index at %d\n", indexOfKey);
+    }
+    else
+    {
+        perror("Unable to create child process\n");
+        return;
+    }
+}
 
 void *handleClient(void *args)
 {
@@ -178,6 +326,12 @@ void *handleClient(void *args)
     // Parse the command keyword
     char *command = strtok(buffer, "\n");
     char *filename = strtok(NULL, "\n");
+    char *sortAlgo = strtok(NULL, "\n");
+    char *searchAlgo = strtok(NULL, "\n");
+    char *key = strtok(NULL, "\n");
+
+    printf("Command received: %s\n", command);
+    printf("Filename received: %s\n", filename);
 
     if (command == NULL)
     {
@@ -186,20 +340,100 @@ void *handleClient(void *args)
         return NULL;
     }
 
-
     // Handle the command
     if (strcmp(command, "HASH") == 0)
     {
+        const char *baseDir = "./ClientHashedFiles/";
+        char clientFileName[512];
+        snprintf(clientFileName, sizeof(clientFileName), "%s%s", baseDir, filename);
+        printf("New Client File Name: %s\n", clientFileName);
+
+        // Ensure the directory exists
+        struct stat st = {0};
+        if (stat(baseDir, &st) == -1)
+        {
+            if (mkdir(baseDir, 0700) < 0)
+            {
+                perror("Error creating directory");
+                close(clientSocket);
+                return NULL;
+            }
+        }
+
+        int fileFD = open(clientFileName, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (fileFD < 0)
+        {
+            perror("Error opening file");
+            close(clientSocket);
+            return NULL;
+        }
+
+        // Read the file contents from the client and write to a file to save on server
+        while ((bytesRead = read(clientSocket, buffer, BUFFER_SIZE)) > 0)
+        {
+            printf("Read %zd bytes from client\n", bytesRead);
+            if (write(fileFD, buffer, bytesRead) < 0)
+            {
+                perror("Error writing to file");
+                close(fileFD);
+                close(clientSocket);
+                return NULL;
+            }
+        }
+
+        if (bytesRead < 0)
+        {
+            perror("Error reading from socket");
+        }
+        else
+        {
+            printf("Finished reading from client\n");
+        }
+
+        close(fileFD);
+
         handleHashRequest(clientSocket, filename);
     }
     else if (strcmp(command, "SORTSEARCH") == 0)
     {
-        // handleSortSearchRequest(clientSocket, buffer + strlen(command) + 1);
+        // sleep(10);
+        // char tempFilename[] = "tempFile.txt";
+        // int fileFD = open(tempFilename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+
+        // // Read the file contents from the client and write to the temporary file
+        // while ((bytesRead = read(clientSocket, buffer, BUFFER_SIZE)) > 0)
+        // {
+        //     printf("Read %zd bytes from client\n", bytesRead);
+        //     if (write(fileFD, buffer, bytesRead) < 0)
+        //     {
+        //         perror("Error writing to file");
+        //         close(fileFD);
+        //         close(clientSocket);
+        //         return NULL;
+        //     }
+        // }
+
+        // if (bytesRead < 0)
+        // {
+        //     perror("Error reading from socket");
+        // }
+        // else
+        // {
+        //     printf("Finished reading from client\n");
+        // }
+
+        // printf("Sort Algo received: %d\n", atoi(sortAlgo));
+        // printf("Search Algo received: %d\n", atoi(searchAlgo));
+        // printf("Key received: %d\n", atoi(key));
+
+        handleSortSearchRequest(filename, clientSocket, atoi(sortAlgo), atoi(searchAlgo), atoi(key));
+
+        // remove(tempFilename);
     }
     else
     {
         fprintf(stderr, "Unknown command: %s\n", command);
-        
+
         // // Send an error response to the client
         // const char *errorResponse = "ERROR: Unknown command\n";
         // write(clientSocket, errorResponse, strlen(errorResponse));
@@ -213,11 +447,11 @@ void *handleClient(void *args)
 
 void runServer(int port)
 {
-    int server_fd;
+    int serverFD;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    if ((serverFD = socket(AF_INET, SOCK_STREAM, 0)) == 0)
     {
         perror("socket failed");
         exit(EXIT_FAILURE);
@@ -227,17 +461,17 @@ void runServer(int port)
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(port);
 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+    if (bind(serverFD, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
         perror("bind failed");
-        close(server_fd);
+        close(serverFD);
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_fd, 3) < 0)
+    if (listen(serverFD, 3) < 0)
     {
         perror("listen failed");
-        close(server_fd);
+        close(serverFD);
         exit(EXIT_FAILURE);
     }
 
@@ -245,27 +479,27 @@ void runServer(int port)
 
     while (1)
     {
-        int *new_sock = malloc(sizeof(int));
-        if ((*new_sock = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
+        int *newSocket = malloc(sizeof(int));
+        if ((*newSocket = accept(serverFD, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
         {
             perror("accept failed");
-            free(new_sock);
+            free(newSocket);
             continue;
         }
 
         printf("Accepted new connection\n");
 
         pthread_t thread_id;
-        if (pthread_create(&thread_id, NULL, handleClient, (void *)new_sock) != 0)
+        if (pthread_create(&thread_id, NULL, handleClient, (void *)newSocket) != 0)
         {
             perror("pthread_create");
-            free(new_sock);
+            free(newSocket);
             continue;
         }
         pthread_detach(thread_id);
     }
 
-    close(server_fd);
+    close(serverFD);
 }
 
 int main(void)
@@ -275,7 +509,7 @@ int main(void)
     if (pid == 0)
     {
         // Child process - Run the sort/search server
-        // runServer(SORT_SEARCH_PORT);
+        runServer(SORT_SEARCH_PORT);
     }
     else if (pid > 0)
     {

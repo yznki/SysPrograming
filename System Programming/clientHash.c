@@ -18,11 +18,11 @@ void sendFileForHash(const char *filename)
     int sock;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE] = {0};
-    int file_fd;
+    int fildFD;
 
     // Open the file
-    file_fd = open(filename, O_RDONLY);
-    if (file_fd < 0)
+    fildFD = open(filename, O_RDONLY);
+    if (fildFD < 0)
     {
         perror("Error opening file");
         return;
@@ -45,31 +45,35 @@ void sendFileForHash(const char *filename)
         return;
     }
 
-    // Send the filename first
     snprintf(buffer, BUFFER_SIZE, "HASH\n%s\n", filename);
     printf("Sending buffer: %s\n", buffer);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
         perror("Error writing filename to socket");
-        close(file_fd);
+        close(fildFD);
         close(sock);
         return;
     }
 
     // Send the file contents
-    ssize_t bytes_read;
-    while ((bytes_read = read(file_fd, buffer, BUFFER_SIZE)) > 0)
+    int bytes_read;
+    while ((bytes_read = read(fildFD, buffer, BUFFER_SIZE)) > 0)
     {
         if (write(sock, buffer, bytes_read) < 0)
         {
             perror("Error writing file to socket");
-            close(file_fd);
+            close(fildFD);
             close(sock);
             return;
         }
     }
-    close(file_fd);
-    shutdown(sock, SHUT_WR);
+    close(fildFD);
+
+    // Shutdown the write side of the socket to signal end of data
+    if (shutdown(sock, SHUT_WR) < 0)
+    {
+        perror("Error shutting down socket");
+    }
 
     // Receive the hash from the server
     int valread = read(sock, buffer, BUFFER_SIZE - 1);
@@ -99,6 +103,8 @@ int main()
 
     // Remove newline character if present
     filename[strcspn(filename, "\n")] = '\0';
+    
+    // const char *filename = "sample.txt";
 
     sendFileForHash(filename);
     return 0;
