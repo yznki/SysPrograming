@@ -13,10 +13,11 @@
 #include <openssl/sha.h>
 #include "../Common/utilities.h"
 
-#define FILE_SIZE_BYTES 0.0005 * 1024 * 1024
+#define FILE_SIZE_BYTES 0.005 * 1024 * 1024
 #define BUFFER_SIZE 1024
 
-void generateFile(const char *filename) {
+void generateFile(const char *filename)
+{
 
     srand(time(NULL));
 
@@ -46,12 +47,10 @@ void generateFile(const char *filename) {
 
     close(fd);
     printf("\nRandom integers file created.\n\n");
-
-
-
 }
 
-void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char *keyToFind) {
+void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char *keyToFind)
+{
     int sock;
     struct sockaddr_in serv_addr;
     int fd;
@@ -95,18 +94,18 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
 
     // Send the file contents
 
-    // ssize_t bytesRead;
-    // while ((bytesRead = read(fd, buffer, BUFFER_SIZE)) > 0)
-    // {
-    //     if (write(sock, buffer, bytesRead) < 0)
-    //     {
-    //         perror("Error writing file to socket");
-    //         close(fd);
-    //         close(sock);
-    //         return;
-    //     }
-    //     printf("Written %zd bytes to server\n", bytesRead);
-    // }
+    ssize_t bytesRead;
+    while ((bytesRead = read(fd, buffer, BUFFER_SIZE)) > 0)
+    {
+        if (write(sock, buffer, bytesRead) < 0)
+        {
+            perror("Error writing file to socket");
+            close(fd);
+            close(sock);
+            return;
+        }
+        printf("Written %zd bytes to server\n", bytesRead);
+    }
 
     close(fd);
 
@@ -147,7 +146,7 @@ int main(void)
 
     char destFile[256] = "./TestingFiles/";
     strcat(destFile, filename);
-    
+
     char sortAlgo;
     printf("Enter desired sort algorithm:\n1. Bubble Sort\n2. Selection Sort\n3. Merge Sort\n4. Quick Sort\n5. Anything\n");
     scanf(" %c", &sortAlgo);

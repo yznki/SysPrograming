@@ -396,47 +396,36 @@ void *handleClient(void *args)
     }
     else if (strcmp(command, "SORTSEARCH") == 0)
     {
-        // sleep(10);
-        // char tempFilename[] = "tempFile.txt";
-        // int fileFD = open(tempFilename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        char fileName[] = "ClientFiles/clientFileXXXXXX"; // Template for mkstemp
+        int fileFD = mkstemp(fileName);
 
-        // // Read the file contents from the client and write to the temporary file
-        // while ((bytesRead = read(clientSocket, buffer, BUFFER_SIZE)) > 0)
-        // {
-        //     printf("Read %zd bytes from client\n", bytesRead);
-        //     if (write(fileFD, buffer, bytesRead) < 0)
-        //     {
-        //         perror("Error writing to file");
-        //         close(fileFD);
-        //         close(clientSocket);
-        //         return NULL;
-        //     }
-        // }
+        // Read the file contents from the client and write to the temporary file
+        while ((bytesRead = read(clientSocket, buffer, BUFFER_SIZE)) > 0)
+        {
+            printf("Read %zd bytes from client\n", bytesRead);
+            if (write(fileFD, buffer, bytesRead) < 0)
+            {
+                perror("Error writing to file");
+                close(fileFD);
+                close(clientSocket);
+                return NULL;
+            }
+        }
 
-        // if (bytesRead < 0)
-        // {
-        //     perror("Error reading from socket");
-        // }
-        // else
-        // {
-        //     printf("Finished reading from client\n");
-        // }
-
-        // printf("Sort Algo received: %d\n", atoi(sortAlgo));
-        // printf("Search Algo received: %d\n", atoi(searchAlgo));
-        // printf("Key received: %d\n", atoi(key));
+        if (bytesRead < 0)
+        {
+            perror("Error reading from socket");
+        }
+        else
+        {
+            printf("Finished reading from client\n");
+        }
 
         handleSortSearchRequest(filename, clientSocket, atoi(sortAlgo), atoi(searchAlgo), atoi(key));
-
-        // remove(tempFilename);
     }
     else
     {
         fprintf(stderr, "Unknown command: %s\n", command);
-
-        // // Send an error response to the client
-        // const char *errorResponse = "ERROR: Unknown command\n";
-        // write(clientSocket, errorResponse, strlen(errorResponse));
     }
 
     // Close the client socket
