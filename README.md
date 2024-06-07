@@ -13,3 +13,9 @@ To run the simulator, execute the compiled binaries from the desired directories
 
 ## Contact
 For any questions or further information, please contact Yazan Kiswani.
+
+## Compile Files in Sys Programming
+```
+gcc $(pkg-config --cflags --libs openssl) server.c -o server.o ../Common/searchSortAlgos.c ../Common/utilities.c                            
+gcc $(pkg-config --cflags --libs openssl) clientSortSearch.c -o clientSortSearch.o ../Common/utilities.c
+```
