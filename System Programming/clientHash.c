@@ -69,12 +69,6 @@ void sendFileForHash(const char *filename)
     }
     close(fildFD);
 
-    // Shutdown the write side of the socket to signal end of data
-    if (shutdown(sock, SHUT_WR) < 0)
-    {
-        perror("Error shutting down socket");
-    }
-
     // Receive the hash from the server
     int valread = read(sock, buffer, BUFFER_SIZE - 1);
     if (valread < 0)
