@@ -11,7 +11,7 @@
 #include <openssl/sha.h>
 #include "../Common/utilities.h"
 
-#define FILE_SIZE_BYTES 5 * 1024 * 1024
+#define FILE_SIZE_BYTES 0.005 * 1024 * 1024
 #define BUFFER_SIZE 1024
 
 void generateFile(const char *filename)
@@ -75,7 +75,7 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
     }
 
     snprintf(buffer, BUFFER_SIZE, "SORTSEARCH\n%s\n%c\n%c\n%s\n", filename, sortAlgo, searchAlgo, keyToFind);
-    printf("Sending buffer: %s\n", buffer);
+    // printf("Sending buffer: %s\n", buffer);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
         perror("Error writing filename to socket");
@@ -93,7 +93,7 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
         return;
     }
 
-    printf("Read array size - %zu", arrSize);
+    printf("Read array size - %zu\n", arrSize);
 
     int *sortedArr = malloc(sizeof(int) * arrSize);
     if (!sortedArr)

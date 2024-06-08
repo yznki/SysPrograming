@@ -255,7 +255,6 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
                 {
                     perror("Error reallocating memory for array");
                     close(fileFD);
-                    free(array);
                     return;
                 }
             }
@@ -276,14 +275,10 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     dispArray(array, arrSize);
     write(clientSocket, &arrSize, sizeof(int));
 
-    printf("Sent array size - %zu\n", arrSize);
-
-    char tempFileName[] = "SortedArrays/sortedArrayXXXXXX";
-    int tempFileFD = mkstemp(tempFileName);
-    if (tempFileFD < 0)
+    int fd[2];
+    if (pipe(fd))
     {
-        perror("Unable to create temporary file");
-        free(array);
+        perror("Unable to create pipe...");
         return;
     }
 
@@ -291,6 +286,7 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     if (pid == 0)
     {
         // Child process for sorting
+        close(fd[0]); // Close reading end of the pipe in child process
         switch (sortAlgo)
         {
         case 1:
@@ -304,64 +300,43 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
             break;
         case 4:
             quickSort(array, 0, arrSize - 1);
-            printf("Sorted\n");
+            printf("Child process: sorting completed using Quick Sort\n");
             break;
         default:
             break;
         }
-
+        write(fd[1], array, sizeof(int) * arrSize);
+        close(fd[1]); // Close writing end of the pipe in child process
+        printf("Child process: data written to pipe\n");
+        write(clientSocket, array, sizeof(int) * arrSize);
+        printf("Child process: sorted array sent to client\n");
         dispArray(array, arrSize);
-
-        // Write the sorted array to the temporary file
-        ssize_t bytes_written = write(tempFileFD, array, sizeof(int) * arrSize);
-        if (bytes_written != sizeof(int) * arrSize)
-        {
-            perror("Error writing sorted array to temporary file");
-            free(array);
-            close(tempFileFD);
-            exit(EXIT_FAILURE);
-        }
-
-        close(tempFileFD);
         free(array);
         exit(0); // Ensure the child process exits after sorting
     }
     else if (pid > 0)
     {
-        wait(NULL); // Wait for the child process to finish
-
-        // Parent process for searching
-        lseek(tempFileFD, 0, SEEK_SET); // Seek to the beginning of the file
-
-        int *sortedArray = malloc(sizeof(int) * arrSize);
-        if (!sortedArray)
-        {
-            perror("Error allocating memory for sorted array");
-            close(tempFileFD);
-            free(array);
-            return;
-        }
-
-        ssize_t bytes_read = read(tempFileFD, sortedArray, sizeof(int) * arrSize);
-        if (bytes_read != sizeof(int) * arrSize)
-        {
-            perror("Error reading sorted array from temporary file");
-            printf("Expected to read %zu bytes, but read %zd bytes\n", sizeof(int) * arrSize, bytes_read);
-            free(sortedArray);
-            close(tempFileFD);
-            free(array);
-            return;
-        }
-
-        close(tempFileFD);
-        unlink(tempFileName); // Remove the temporary file
-
         int indexOfKey;
+
         switch (searchAlgo)
         {
         case 1:
-            indexOfKey = linearSearch(sortedArray, arrSize, keyToFind);
-            break;
+            indexOfKey = linearSearch(array, arrSize, keyToFind);
+            write(clientSocket, &indexOfKey, sizeof(int));
+            printf("Index at %d\n", indexOfKey);
+            return;
+        }
+
+        wait(NULL); // Wait for the child process to finish
+
+        // Parent process for searching
+        close(fd[1]); // Close writing end of the pipe in parent process
+        int *sortedArray = malloc(sizeof(int) * arrSize);
+        read(fd[0], sortedArray, sizeof(int) * arrSize);
+        close(fd[0]); // Close reading end of the pipe in parent process
+
+        switch (searchAlgo)
+        {
         case 2:
             indexOfKey = binarySearch(sortedArray, arrSize, keyToFind);
             break;
@@ -375,7 +350,6 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
             indexOfKey = -1; // Invalid search algorithm
             break;
         }
-
         write(clientSocket, &indexOfKey, sizeof(int));
         printf("Index at %d\n", indexOfKey);
         free(sortedArray); // Free allocated memory
@@ -383,7 +357,6 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     else
     {
         perror("Unable to create child process\n");
-        close(tempFileFD);
         free(array);
     }
 }
