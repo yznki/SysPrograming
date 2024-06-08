@@ -1,29 +1,58 @@
 #include "searchSortAlgos.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
-
 
 int linearSearch(int arr[], int size, int key)
 {
+    int count = 0;
+    int firstIndex = -1;
     for (int i = 0; i < size; i++)
     {
         if (arr[i] == key)
         {
-            return i;
+            if (firstIndex == -1)
+            {
+                firstIndex = i;
+            }
+            count++;
         }
     }
-    return -1;
+    printf("Number of occurrences of %d: %d\n", key, count);
+    return firstIndex;
 }
 
 int binarySearch(int arr[], int size, int key)
 {
+    int count = 0;
+    int firstIndex = -1;
     int low = 0, high = size - 1;
     while (low <= high)
     {
         int mid = low + (high - low) / 2;
         if (arr[mid] == key)
         {
-            return mid;
+            firstIndex = mid;
+            count = 1;
+
+            // Count occurrences to the left of mid
+            for (int i = mid - 1; i >= 0 && arr[i] == key; i--)
+            {
+                if (firstIndex == mid)
+                {
+                    firstIndex = i;
+                }
+                count++;
+            }
+
+            // Count occurrences to the right of mid
+            for (int i = mid + 1; i < size && arr[i] == key; i++)
+            {
+                count++;
+            }
+
+            printf("Number of occurrences of %d: %d\n", key, count);
+            return firstIndex;
         }
         else if (arr[mid] < key)
         {
@@ -34,7 +63,8 @@ int binarySearch(int arr[], int size, int key)
             high = mid - 1;
         }
     }
-    return -1;
+    printf("Number of occurrences of %d: %d\n", key, count);
+    return firstIndex;
 }
 
 int min(int a, int b)
@@ -44,6 +74,8 @@ int min(int a, int b)
 
 int jumpSearch(int arr[], int size, int key)
 {
+    int count = 0;
+    int firstIndex = -1;
     int step = sqrt(size);
     int prev = 0;
 
@@ -53,7 +85,8 @@ int jumpSearch(int arr[], int size, int key)
         step += sqrt(size);
         if (prev >= size)
         {
-            return -1;
+            printf("Number of occurrences of %d: %d\n", key, count);
+            return firstIndex;
         }
     }
 
@@ -61,15 +94,22 @@ int jumpSearch(int arr[], int size, int key)
     {
         if (arr[i] == key)
         {
-            return i;
+            if (firstIndex == -1)
+            {
+                firstIndex = i;
+            }
+            count++;
         }
     }
 
-    return -1;
+    printf("Number of occurrences of %d: %d\n", key, count);
+    return firstIndex;
 }
 
 int interpolationSearch(int arr[], int size, int key)
 {
+    int count = 0;
+    int firstIndex = -1;
     int low = 0, high = size - 1;
 
     while (low <= high && key >= arr[low] && key <= arr[high])
@@ -77,15 +117,39 @@ int interpolationSearch(int arr[], int size, int key)
         if (low == high)
         {
             if (arr[low] == key)
-                return low;
-            return -1;
+            {
+                firstIndex = low;
+                count = 1;
+            }
+            printf("Number of occurrences of %d: %d\n", key, count);
+            return firstIndex;
         }
 
         int pos = low + (((double)(high - low) / (arr[high] - arr[low])) * (key - arr[low]));
 
         if (arr[pos] == key)
         {
-            return pos;
+            firstIndex = pos;
+            count = 1;
+
+            // Count occurrences to the left of pos
+            for (int i = pos - 1; i >= 0 && arr[i] == key; i--)
+            {
+                if (firstIndex == pos)
+                {
+                    firstIndex = i;
+                }
+                count++;
+            }
+
+            // Count occurrences to the right of pos
+            for (int i = pos + 1; i < size && arr[i] == key; i++)
+            {
+                count++;
+            }
+
+            printf("Number of occurrences of %d: %d\n", key, count);
+            return firstIndex;
         }
 
         if (arr[pos] < key)
@@ -97,7 +161,8 @@ int interpolationSearch(int arr[], int size, int key)
             high = pos - 1;
         }
     }
-    return -1;
+    printf("Number of occurrences of %d: %d\n", key, count);
+    return firstIndex;
 }
 
 // Sorting
