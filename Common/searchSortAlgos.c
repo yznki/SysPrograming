@@ -18,7 +18,7 @@ int linearSearch(int arr[], int size, int key)
             count++;
         }
     }
-    printf("Number of occurrences of %d: %d\n", key, count);
+    printf("Number of occurrences of %d - Using Linear Search Algorithm: %d\n", key, count);
     return firstIndex;
 }
 
@@ -51,7 +51,7 @@ int binarySearch(int arr[], int size, int key)
                 count++;
             }
 
-            printf("Number of occurrences of %d: %d\n", key, count);
+            printf("Number of occurrences of %d - Using Binary Search Algorithm: %d\n", key, count);
             return firstIndex;
         }
         else if (arr[mid] < key)
@@ -63,7 +63,7 @@ int binarySearch(int arr[], int size, int key)
             high = mid - 1;
         }
     }
-    printf("Number of occurrences of %d: %d\n", key, count);
+    printf("Number of occurrences of %d - Using Binary Search Algorithm: %d\n", key, count);
     return firstIndex;
 }
 
@@ -85,7 +85,7 @@ int jumpSearch(int arr[], int size, int key)
         step += sqrt(size);
         if (prev >= size)
         {
-            printf("Number of occurrences of %d: %d\n", key, count);
+            printf("Number of occurrences of %d - Using Jump Search Algorithm: %d\n", key, count);
             return firstIndex;
         }
     }
@@ -102,7 +102,7 @@ int jumpSearch(int arr[], int size, int key)
         }
     }
 
-    printf("Number of occurrences of %d: %d\n", key, count);
+    printf("Number of occurrences of %d - Using Jump Search Algorithm: %d\n", key, count);
     return firstIndex;
 }
 
@@ -121,7 +121,7 @@ int interpolationSearch(int arr[], int size, int key)
                 firstIndex = low;
                 count = 1;
             }
-            printf("Number of occurrences of %d: %d\n", key, count);
+            printf("Number of occurrences of %d - Using Interpolation Search Algorithm: %d\n", key, count);
             return firstIndex;
         }
 
@@ -148,7 +148,7 @@ int interpolationSearch(int arr[], int size, int key)
                 count++;
             }
 
-            printf("Number of occurrences of %d: %d\n", key, count);
+            printf("Number of occurrences of %d - Using Interpolation Search Algorithm: %d\n", key, count);
             return firstIndex;
         }
 
@@ -161,7 +161,7 @@ int interpolationSearch(int arr[], int size, int key)
             high = pos - 1;
         }
     }
-    printf("Number of occurrences of %d: %d\n", key, count);
+    printf("Number of occurrences of %d - Using Interpolation Search Algorithm: %d\n", key, count);
     return firstIndex;
 }
 

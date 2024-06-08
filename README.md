@@ -17,7 +17,7 @@ For any questions or further information, please contact Yazan Kiswani.
 ## Compile Files in Sys Programming
 ### For Anything other than socket programing
 ```
-gcc $(pkg-config --cflags --libs openssl) clientHash.c -o clientHash.o ../Common/utilities.c
+gcc $(pkg-config --cflags --libs openssl) main.c -o main.o ../Common/utilities.c ../Common/searchSortAlgos.c
 ```
 ### For socket programing
 ```
