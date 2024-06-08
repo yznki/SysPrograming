@@ -22,7 +22,7 @@ typedef struct
 {
     char filename[256];
     char hash[SHA256_DIGEST_LENGTH * 2 + 1];
-
+    time_t mtime; // Last modification time
 } HashCache;
 
 HashCache hashCache[CACHE_SIZE];
@@ -30,14 +30,49 @@ int hashCacheSize = 0;
 pthread_mutex_t cacheLock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t hashLock = PTHREAD_MUTEX_INITIALIZER;
 
-int findHash(const char *filename, char *hash)
+// Function Declarations
+int findHash(const char *filename, char *hash, time_t *mtime);
+void addHash(const char *filename, const char *hash, time_t mtime);
+void computeHash(const char *filename, char *hash, time_t *mtime);
+void handleFileTransfer(int clientSocket);
+void handleHashRequest(int clientSocket, const char *filename);
+void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind);
+void *handleClient(void *args);
+void runServer(int port);
+
+int main(void)
+{
+    pid_t pid = fork();
+
+    if (pid == 0)
+    {
+        // Child process - Run the sort/search server
+        runServer(SORT_SEARCH_PORT);
+    }
+    else if (pid > 0)
+    {
+        // Parent process - Run the hash server
+        runServer(HASH_PORT);
+    }
+    else
+    {
+        perror("Fork failed");
+        exit(EXIT_FAILURE);
+    }
+
+    return 0;
+}
+
+// Find a hash in the cache
+int findHash(const char *filename, char *hash, time_t *mtime)
 {
     pthread_mutex_lock(&cacheLock);
     for (int i = 0; i < hashCacheSize; i++)
     {
-        if (strcmp(hashCache[i].filename, filename) == 0)
+        if (strcmp(hashCache[i].filename, filename) == 0 && hashCache[i].mtime == *mtime)
         {
             strcpy(hash, hashCache[i].hash);
+            *mtime = hashCache[i].mtime;
             pthread_mutex_unlock(&cacheLock);
             return 1;
         }
@@ -46,42 +81,45 @@ int findHash(const char *filename, char *hash)
     return 0;
 }
 
-void addHash(const char *filename, const char *hash)
+// Add a new hash to the cache
+void addHash(const char *filename, const char *hash, time_t mtime)
 {
     pthread_mutex_lock(&cacheLock);
     if (hashCacheSize < CACHE_SIZE)
     {
         strcpy(hashCache[hashCacheSize].filename, filename);
         strcpy(hashCache[hashCacheSize].hash, hash);
+        hashCache[hashCacheSize].mtime = mtime;
         hashCacheSize++;
     }
     else
     {
-        // overwrite hash
+        // Overwrite the oldest hash
         strcpy(hashCache[0].filename, filename);
         strcpy(hashCache[0].hash, hash);
+        hashCache[0].mtime = mtime;
         hashCacheSize = 1;
     }
     pthread_mutex_unlock(&cacheLock);
 }
 
-void computeHash(const char *filename, char *hash)
+// Compute the hash for a file
+void computeHash(const char *filename, char *hash, time_t *mtime)
 {
-    char dest_file[] = "hashOutput.txt";
+    char hash_file[] = "hashOutput.txt";
+    char mtime_file[] = "mtimeOutput.txt";
     pid_t pid;
 
     pthread_mutex_lock(&hashLock);
-
     pid = fork();
 
     if (pid == 0)
     {
         // Child process
-        char *args[] = {"../Common/hashing.o", (char *)filename, dest_file, NULL};
+        char *args[] = {"./hash.sh", (char *)filename, hash_file, mtime_file, NULL};
         execv(args[0], args);
-
         perror("execv");
-        exit(EXIT_FAILURE); // Exits and does not return because it's a main service, if it's down we have to close the server.
+        exit(EXIT_FAILURE); // Exit if execv fails
     }
     else if (pid > 0)
     {
@@ -89,59 +127,81 @@ void computeHash(const char *filename, char *hash)
         int status;
         waitpid(pid, &status, 0);
 
-        if (WIFEXITED(status))
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
         {
-            if (WEXITSTATUS(status) == 0)
+            // Read the hash
+            int hashFD = open(hash_file, O_RDONLY);
+            if (hashFD < 0)
             {
-                int destinationFD = open(dest_file, O_RDONLY);
-                if (destinationFD < 0)
-                {
-                    perror("open dest_file");
-                    strcpy(hash, "ERROR: FILE NOT FOUND");
-                    pthread_mutex_unlock(&hashLock);
-                    return;
-                }
-
-                int bytesRead = read(destinationFD, hash, SHA256_DIGEST_LENGTH * 2);
-                if (bytesRead < 0)
-                {
-                    perror("read");
-                    strcpy(hash, "ERROR: FILE READ ERROR");
-                    close(destinationFD);
-                    pthread_mutex_unlock(&hashLock);
-                    return;
-                }
-                hash[bytesRead] = '\0';
-                close(destinationFD);
-            }
-            else if (WEXITSTATUS(status) == 1)
-            {
+                perror("open hash_file");
                 strcpy(hash, "ERROR: FILE NOT FOUND");
             }
             else
             {
-                strcpy(hash, "ERROR: HASH COMPUTATION FAILED");
+                int bytesRead = read(hashFD, hash, SHA256_DIGEST_LENGTH * 2);
+                if (bytesRead < 0)
+                {
+                    perror("read");
+                    strcpy(hash, "ERROR: FILE READ ERROR");
+                }
+                else
+                {
+                    hash[bytesRead] = '\0';
+                }
+                close(hashFD);
+            }
+
+            // Read the modification time
+            int mtimeFD = open(mtime_file, O_RDONLY);
+            if (mtimeFD < 0)
+            {
+                perror("open mtime_file");
+                *mtime = 0;
+            }
+            else
+            {
+                char mtime_str[20];
+                int bytesRead = read(mtimeFD, mtime_str, sizeof(mtime_str) - 1);
+                if (bytesRead < 0)
+                {
+                    perror("read");
+                    *mtime = 0;
+                }
+                else
+                {
+                    mtime_str[bytesRead] = '\0';
+                    *mtime = atol(mtime_str);
+                }
+                close(mtimeFD);
             }
         }
         else
         {
             strcpy(hash, "ERROR: HASH COMPUTATION FAILED");
+            *mtime = 0;
         }
-        remove("hash_output.txt");
+        remove(hash_file);
+        remove(mtime_file);
     }
     else
     {
         perror("fork");
         strcpy(hash, "ERROR: FORK FAILED");
+        *mtime = 0;
     }
     pthread_mutex_unlock(&hashLock);
 }
 
+// Handle hash request from client
 void handleHashRequest(int clientSocket, const char *filename)
 {
     char hash[SHA256_DIGEST_LENGTH * 2 + 1];
+    time_t mtime;
 
-    if (findHash(filename, hash))
+    // Compute the current hash and modification time
+    computeHash(filename, hash, &mtime);
+
+    if (findHash(filename, hash, &mtime))
     {
         // Send the cached hash to the client
         write(clientSocket, hash, strlen(hash));
@@ -149,21 +209,20 @@ void handleHashRequest(int clientSocket, const char *filename)
     }
     else
     {
-        // Compute the hash and send it to the client
-        computeHash(filename, hash);
-        addHash(filename, hash);
+        // Add the new hash to the cache and send it to the client
+        addHash(filename, hash, mtime);
         write(clientSocket, hash, strlen(hash));
         printf("Hash computed and saved.\n");
     }
 }
 
+// Handle sorting and searching request from client
 void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind)
 {
     int fileFD;
-    char *token;
     ssize_t bytes_read;
     char buffer[BUFFER_SIZE];
-    size_t current_size = 1024; // Initial Size to start buffering
+    size_t current_size = 1024; // Initial buffer size
     size_t arrSize = 0;
     int *array = NULL;
 
@@ -181,11 +240,12 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(fileFD);
         return;
     }
+
     // Read the file contents and parse integers
     while ((bytes_read = read(fileFD, buffer, BUFFER_SIZE - 1)) > 0)
     {
         buffer[bytes_read] = '\0'; // Null-terminate the buffer
-        token = strtok(buffer, " \n");
+        char *token = strtok(buffer, " \n");
         while (token != NULL)
         {
             if (arrSize >= current_size)
@@ -215,97 +275,116 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     close(fileFD);
     dispArray(array, arrSize);
     write(clientSocket, &arrSize, sizeof(int));
-    read(clientSocket, NULL, 0);
 
-    int fd[2];
-    if (pipe(fd))
+    char tempFileName[] = "SortedArrays/sortedArrayXXXXXX";
+    int tempFileFD = mkstemp(tempFileName);
+    if (tempFileFD < 0)
     {
-        perror("Unable to create pipe...\n");
+        perror("Unable to create temporary file");
+        free(array);
         return;
     }
 
     int pid = fork();
-
     if (pid == 0)
     {
-        // Sorting
+        // Child process for sorting
         switch (sortAlgo)
         {
         case 1:
             bubbleSort(array, arrSize);
-            write(fd[1], array, sizeof(int) * arrSize);
             break;
         case 2:
             selectionSort(array, arrSize);
-            write(fd[1], array, sizeof(int) * arrSize);
             break;
         case 3:
             mergeSort(array, 0, arrSize - 1);
-            write(fd[1], array, sizeof(int) * arrSize);
             break;
         case 4:
             quickSort(array, 0, arrSize - 1);
-            write(fd[1], array, sizeof(int) * arrSize);
             break;
-        case 5:
-            // Code for multithreading of all sorting algos together.
-            break;
-
         default:
             break;
         }
-        write(clientSocket, array, sizeof(int) * arrSize);
-        printf("Sorted Array\n");
+
         dispArray(array, arrSize);
+
+        // Write the sorted array to the temporary file
+        ssize_t bytes_written = write(tempFileFD, array, sizeof(int) * arrSize);
+        if (bytes_written != sizeof(int) * arrSize)
+        {
+            perror("Error writing sorted array to temporary file");
+            free(array);
+            close(tempFileFD);
+            exit(EXIT_FAILURE);
+        }
+
+        close(tempFileFD);
+        free(array);
+        exit(0); // Ensure the child process exits after sorting
     }
     else if (pid > 0)
     {
-        // Searching
+        wait(NULL); // Wait for the child process to finish
+
+        // Parent process for searching
+        lseek(tempFileFD, 0, SEEK_SET); // Seek to the beginning of the file
+
         int *sortedArray = malloc(sizeof(int) * arrSize);
-        read(fd[0], sortedArray, sizeof(int) * arrSize);
-        read(clientSocket, NULL, 0);
+        if (!sortedArray)
+        {
+            perror("Error allocating memory for sorted array");
+            close(tempFileFD);
+            free(array);
+            return;
+        }
+
+        ssize_t bytes_read = read(tempFileFD, sortedArray, sizeof(int) * arrSize);
+        if (bytes_read != sizeof(int) * arrSize)
+        {
+            perror("Error reading sorted array from temporary file");
+            free(sortedArray);
+            close(tempFileFD);
+            free(array);
+            return;
+        }
+
+        close(tempFileFD);
+        unlink(tempFileName); // Remove the temporary file
 
         int indexOfKey;
-
         switch (searchAlgo)
         {
         case 1:
-            indexOfKey = linearSearch(array, arrSize, keyToFind);
-            write(clientSocket, &indexOfKey, sizeof(int));
+            indexOfKey = linearSearch(sortedArray, arrSize, keyToFind);
             break;
         case 2:
-            wait(NULL);
             indexOfKey = binarySearch(sortedArray, arrSize, keyToFind);
-            write(clientSocket, &indexOfKey, sizeof(int));
             break;
         case 3:
-            wait(NULL);
             indexOfKey = jumpSearch(sortedArray, arrSize, keyToFind);
-            write(clientSocket, &indexOfKey, sizeof(int));
             break;
         case 4:
-            wait(NULL);
             indexOfKey = interpolationSearch(sortedArray, arrSize, keyToFind);
-            write(clientSocket, &indexOfKey, sizeof(int));
             break;
-        case 5:
-            wait(NULL);
-            // Code for multithreading of all searching algos together.
-            break;
-
         default:
+            indexOfKey = -1; // Invalid search algorithm
             break;
         }
 
+        write(clientSocket, &indexOfKey, sizeof(int));
         printf("Index at %d\n", indexOfKey);
+        free(sortedArray); // Free allocated memory
     }
     else
     {
         perror("Unable to create child process\n");
-        return;
+        close(tempFileFD);
+        free(array);
     }
 }
 
+// Thread function to handle client requests
 void *handleClient(void *args)
 {
     int clientSocket = *((int *)args);
@@ -323,15 +402,19 @@ void *handleClient(void *args)
     }
     buffer[bytesRead] = '\0'; // Null-terminate the buffer
 
-    // Parse the command keyword
+    // Parse the command and parameters
     char *command = strtok(buffer, "\n");
     char *filename = strtok(NULL, "\n");
     char *sortAlgo = strtok(NULL, "\n");
     char *searchAlgo = strtok(NULL, "\n");
     char *key = strtok(NULL, "\n");
 
-    printf("Command received: %s\n", command);
-    printf("Filename received: %s\n", filename);
+    // Debug logging
+    printf("Command: %s\n", command);
+    printf("Filename: %s\n", filename);
+    printf("Sort Algorithm: %s\n", sortAlgo);
+    printf("Search Algorithm: %s\n", searchAlgo);
+    printf("Key to Find: %s\n", key);
 
     if (command == NULL)
     {
@@ -343,84 +426,11 @@ void *handleClient(void *args)
     // Handle the command
     if (strcmp(command, "HASH") == 0)
     {
-        const char *baseDir = "./ClientHashedFiles/";
-        char clientFileName[512];
-        snprintf(clientFileName, sizeof(clientFileName), "%s%s", baseDir, filename);
-        printf("New Client File Name: %s\n", clientFileName);
-
-        // Ensure the directory exists
-        struct stat st = {0};
-        if (stat(baseDir, &st) == -1)
-        {
-            if (mkdir(baseDir, 0700) < 0)
-            {
-                perror("Error creating directory");
-                close(clientSocket);
-                return NULL;
-            }
-        }
-
-        int fileFD = open(clientFileName, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-        if (fileFD < 0)
-        {
-            perror("Error opening file");
-            close(clientSocket);
-            return NULL;
-        }
-
-        // Read the file contents from the client and write to a file to save on server
-        while ((bytesRead = read(clientSocket, buffer, BUFFER_SIZE)) > 0)
-        {
-            printf("Read %zd bytes from client\n", bytesRead);
-            if (write(fileFD, buffer, bytesRead) < 0)
-            {
-                perror("Error writing to file");
-                close(fileFD);
-                close(clientSocket);
-                return NULL;
-            }
-        }
-
-        if (bytesRead < 0)
-        {
-            perror("Error reading from socket");
-        }
-        else
-        {
-            printf("Finished reading from client\n");
-        }
-
-        close(fileFD);
-
+        printf("%s\n", filename);
         handleHashRequest(clientSocket, filename);
     }
     else if (strcmp(command, "SORTSEARCH") == 0)
     {
-        char fileName[] = "ClientFiles/clientFileXXXXXX"; // Template for mkstemp
-        int fileFD = mkstemp(fileName);
-
-        // Read the file contents from the client and write to the temporary file
-        while ((bytesRead = read(clientSocket, buffer, BUFFER_SIZE)) > 0)
-        {
-            printf("Read %zd bytes from client\n", bytesRead);
-            if (write(fileFD, buffer, bytesRead) < 0)
-            {
-                perror("Error writing to file");
-                close(fileFD);
-                close(clientSocket);
-                return NULL;
-            }
-        }
-
-        if (bytesRead < 0)
-        {
-            perror("Error reading from socket");
-        }
-        else
-        {
-            printf("Finished reading from client\n");
-        }
-
         handleSortSearchRequest(filename, clientSocket, atoi(sortAlgo), atoi(searchAlgo), atoi(key));
     }
     else
@@ -430,19 +440,20 @@ void *handleClient(void *args)
 
     // Close the client socket
     close(clientSocket);
-
     return NULL;
 }
 
+// Function to run the server
 void runServer(int port)
 {
     int serverFD;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
 
+    // Create socket
     if ((serverFD = socket(AF_INET, SOCK_STREAM, 0)) == 0)
     {
-        perror("socket failed");
+        perror("Socket failed");
         exit(EXIT_FAILURE);
     }
 
@@ -450,16 +461,18 @@ void runServer(int port)
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(port);
 
+    // Bind the socket
     if (bind(serverFD, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
-        perror("bind failed");
+        perror("Bind failed");
         close(serverFD);
         exit(EXIT_FAILURE);
     }
 
+    // Listen for incoming connections
     if (listen(serverFD, 3) < 0)
     {
-        perror("listen failed");
+        perror("Listen failed");
         close(serverFD);
         exit(EXIT_FAILURE);
     }
@@ -471,7 +484,7 @@ void runServer(int port)
         int *newSocket = malloc(sizeof(int));
         if ((*newSocket = accept(serverFD, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
         {
-            perror("accept failed");
+            perror("Accept failed");
             free(newSocket);
             continue;
         }
@@ -489,22 +502,4 @@ void runServer(int port)
     }
 
     close(serverFD);
-}
-
-int main(void)
-{
-    pid_t pid = fork();
-
-    if (pid == 0)
-    {
-        // Child process - Run the sort/search server
-        runServer(SORT_SEARCH_PORT);
-    }
-    else if (pid > 0)
-    {
-        // Parent process - Run the hash server
-        runServer(HASH_PORT);
-    }
-
-    return 0;
 }

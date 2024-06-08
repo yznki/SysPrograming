@@ -18,15 +18,6 @@ void sendFileForHash(const char *filename)
     int sock;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE] = {0};
-    int fildFD;
-
-    // Open the file
-    fildFD = open(filename, O_RDONLY);
-    if (fildFD < 0)
-    {
-        perror("Error opening file");
-        return;
-    }
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
@@ -45,29 +36,15 @@ void sendFileForHash(const char *filename)
         return;
     }
 
+    // Send the hashing command
     snprintf(buffer, BUFFER_SIZE, "HASH\n%s\n", filename);
     printf("Sending buffer: %s\n", buffer);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
         perror("Error writing filename to socket");
-        close(fildFD);
         close(sock);
         return;
     }
-
-    // Send the file contents
-    int bytes_read;
-    while ((bytes_read = read(fildFD, buffer, BUFFER_SIZE)) > 0)
-    {
-        if (write(sock, buffer, bytes_read) < 0)
-        {
-            perror("Error writing file to socket");
-            close(fildFD);
-            close(sock);
-            return;
-        }
-    }
-    close(fildFD);
 
     // Receive the hash from the server
     int valread = read(sock, buffer, BUFFER_SIZE - 1);
@@ -86,19 +63,17 @@ void sendFileForHash(const char *filename)
 
 int main()
 {
-    char filename[256];
+    char filename[256] = "sample.txt";
 
-    printf("Enter the filename: ");
-    if (fgets(filename, sizeof(filename), stdin) == NULL)
-    {
-        perror("Error reading filename");
-        exit(EXIT_FAILURE);
-    }
+    // printf("Enter the filename: ");
+    // if (fgets(filename, sizeof(filename), stdin) == NULL)
+    // {
+    //     perror("Error reading filename");
+    //     exit(EXIT_FAILURE);
+    // }
 
-    // Remove newline character if present
-    filename[strcspn(filename, "\n")] = '\0';
-    
-    // const char *filename = "sample.txt";
+    // // Remove newline character if present
+    // filename[strcspn(filename, "\n")] = '\0';
 
     sendFileForHash(filename);
     return 0;
