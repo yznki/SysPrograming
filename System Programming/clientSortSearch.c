@@ -84,13 +84,16 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
     }
 
 
-    int keyFound, arrSize;
+    int keyFound;
+    size_t arrSize;
     if (read(sock, &arrSize, sizeof(int)) < 0)
     {
         perror("Error reading array size from socket");
         close(sock);
         return;
     }
+
+    printf("Read array size - %zu", arrSize);
 
     int *sortedArr = malloc(sizeof(int) * arrSize);
     if (!sortedArr)

@@ -216,7 +216,6 @@ void handleHashRequest(int clientSocket, const char *filename)
     }
 }
 
-// Handle sorting and searching request from client
 void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind)
 {
     int fileFD;
@@ -256,6 +255,7 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
                 {
                     perror("Error reallocating memory for array");
                     close(fileFD);
+                    free(array);
                     return;
                 }
             }
@@ -275,6 +275,8 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     close(fileFD);
     dispArray(array, arrSize);
     write(clientSocket, &arrSize, sizeof(int));
+
+    printf("Sent array size - %zu\n", arrSize);
 
     char tempFileName[] = "SortedArrays/sortedArrayXXXXXX";
     int tempFileFD = mkstemp(tempFileName);
@@ -302,6 +304,7 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
             break;
         case 4:
             quickSort(array, 0, arrSize - 1);
+            printf("Sorted\n");
             break;
         default:
             break;
@@ -343,6 +346,7 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         if (bytes_read != sizeof(int) * arrSize)
         {
             perror("Error reading sorted array from temporary file");
+            printf("Expected to read %zu bytes, but read %zd bytes\n", sizeof(int) * arrSize, bytes_read);
             free(sortedArray);
             close(tempFileFD);
             free(array);
@@ -412,9 +416,6 @@ void *handleClient(void *args)
     // Debug logging
     printf("Command: %s\n", command);
     printf("Filename: %s\n", filename);
-    printf("Sort Algorithm: %s\n", sortAlgo);
-    printf("Search Algorithm: %s\n", searchAlgo);
-    printf("Key to Find: %s\n", key);
 
     if (command == NULL)
     {
@@ -431,6 +432,9 @@ void *handleClient(void *args)
     }
     else if (strcmp(command, "SORTSEARCH") == 0)
     {
+        printf("Sort Algorithm: %s\n", sortAlgo);
+        printf("Search Algorithm: %s\n", searchAlgo);
+        printf("Key to Find: %s\n", key);
         handleSortSearchRequest(filename, clientSocket, atoi(sortAlgo), atoi(searchAlgo), atoi(key));
     }
     else
