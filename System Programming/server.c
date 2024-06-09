@@ -17,6 +17,7 @@
 
 #define CACHE_SIZE 256
 #define BUFFER_SIZE 1024
+#define EOF_MARKER "EOF\n"
 
 typedef struct
 {
@@ -361,16 +362,63 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     }
 }
 
+void handleFileReceive(int client_socket)
+{
+    ssize_t n;
+    int fp;
+    char *filename = "recv.txt";
+    char buffer[BUFFER_SIZE];
+
+    fp = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fp == -1)
+    {
+        perror("[-]Error in opening file.");
+        exit(1);
+    }
+
+    while (1)
+    {
+        n = recv(client_socket, buffer, BUFFER_SIZE, 0);
+        if (n <= 0)
+        {
+            break;
+        }
+
+        // Check for EOF marker
+        if (strncmp(buffer, EOF_MARKER, strlen(EOF_MARKER)) == 0)
+        {
+            // Send acknowledgment back to client
+            send(client_socket, "EOF_ACK", strlen("EOF_ACK"), 0);
+            break;
+        }
+
+        // Write only the received bytes
+        write(fp, buffer, n);
+    }
+
+    if (n == -1)
+    {
+        perror("[-]Error in receiving data.");
+    }
+
+    close(fp);
+}
+
 // Thread function to handle client requests
 void *handleClient(void *args)
 {
     int clientSocket = *((int *)args);
     free(args);
+
+    handleFileReceive(clientSocket);
+
     char buffer[BUFFER_SIZE];
     ssize_t bytesRead;
 
+    printf("Testing\n");
     // Read the request from the client
     bytesRead = read(clientSocket, buffer, BUFFER_SIZE - 1);
+    printf("Testing\n");
     if (bytesRead < 0)
     {
         perror("Error reading from socket");
