@@ -12,6 +12,48 @@
 #include "../Common/utilities.h"
 
 #define BUFFER_SIZE 1024
+#define EOF_MARKER "EOF\n"
+
+void handleFileSending(const char *filename, int sock)
+{
+    ssize_t bytesRead;
+    char data[BUFFER_SIZE];
+
+    int fp = open(filename, O_RDONLY);
+    if (fp == -1)
+    {
+        perror("[-]Error in opening file.");
+        exit(1);
+    }
+
+    while ((bytesRead = read(fp, data, BUFFER_SIZE)) > 0)
+    {
+        if (send(sock, data, bytesRead, 0) == -1)
+        {
+            perror("[-]Error in sending file.");
+            close(fp);
+            exit(1);
+        }
+    }
+
+    if (bytesRead == -1)
+    {
+        perror("[-]Error in reading file.");
+    }
+
+    // Send EOF marker separately
+    if (send(sock, EOF_MARKER, strlen(EOF_MARKER), 0) == -1)
+    {
+        perror("[-]Error in sending EOF marker.");
+        close(fp);
+        exit(1);
+    }
+
+    // Small delay to ensure EOF is processed separately
+    usleep(1000);
+
+    close(fp);
+}
 
 void sendFileForHash(const char *filename)
 {
@@ -36,6 +78,25 @@ void sendFileForHash(const char *filename)
         return;
     }
 
+    // Send the file first
+    handleFileSending(filename, sock);
+
+    // Wait for server acknowledgment of EOF marker
+    int valread = read(sock, buffer, BUFFER_SIZE - 1);
+    if (valread < 0)
+    {
+        perror("Error reading from socket");
+        close(sock);
+        return;
+    }
+    buffer[valread] = '\0'; // Null-terminate the string
+    if (strcmp(buffer, "EOF_ACK") != 0)
+    {
+        fprintf(stderr, "Did not receive EOF_ACK\n");
+        close(sock);
+        return;
+    }
+
     // Send the hashing command
     snprintf(buffer, BUFFER_SIZE, "HASH\n%s\n", filename);
     printf("Sending buffer: %s\n", buffer);
@@ -47,7 +108,7 @@ void sendFileForHash(const char *filename)
     }
 
     // Receive the hash from the server
-    int valread = read(sock, buffer, BUFFER_SIZE - 1);
+    valread = read(sock, buffer, BUFFER_SIZE - 1);
     if (valread < 0)
     {
         perror("Error reading from socket");
