@@ -16,8 +16,7 @@
 #include "../Common/utilities.h"
 
 #define CACHE_SIZE 256
-#define BUFFER_SIZE 4096
-#define FILE_CHUNK_SIZE 4096
+#define BUFFER_SIZE 1024
 
 typedef struct
 {
@@ -110,8 +109,8 @@ void addHash(const char *filename, const char *hash, time_t mtime)
 // Compute the hash for a file
 void computeHash(const char *filename, char *hash, time_t *mtime)
 {
-    char hash_file[] = "hashOutput.txt";
-    char mtime_file[] = "mtimeOutput.txt";
+    char hashFile[] = "hashOutput.txt";
+    char mtimeFile[] = "mtimeOutput.txt";
     pid_t pid;
 
     pthread_mutex_lock(&hashLock);
@@ -120,7 +119,7 @@ void computeHash(const char *filename, char *hash, time_t *mtime)
     if (pid == 0)
     {
         // Child process
-        char *args[] = {"./hash.sh", (char *)filename, hash_file, mtime_file, NULL};
+        char *args[] = {"./hash.sh", (char *)filename, hashFile, mtimeFile, NULL};
         execv(args[0], args);
         perror("execv");
         exit(EXIT_FAILURE); // Exit if execv fails
@@ -134,10 +133,10 @@ void computeHash(const char *filename, char *hash, time_t *mtime)
         if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
         {
             // Read the hash
-            int hashFD = open(hash_file, O_RDONLY);
+            int hashFD = open(hashFile, O_RDONLY);
             if (hashFD < 0)
             {
-                perror("open hash_file");
+                perror("open hashFile");
                 strcpy(hash, "ERROR: FILE NOT FOUND");
             }
             else
@@ -156,16 +155,16 @@ void computeHash(const char *filename, char *hash, time_t *mtime)
             }
 
             // Read the modification time
-            int mtimeFD = open(mtime_file, O_RDONLY);
+            int mtimeFD = open(mtimeFile, O_RDONLY);
             if (mtimeFD < 0)
             {
-                perror("open mtime_file");
+                perror("open mtimeFile");
                 *mtime = 0;
             }
             else
             {
-                char mtime_str[20];
-                int bytesRead = read(mtimeFD, mtime_str, sizeof(mtime_str) - 1);
+                char mtimeStr[20];
+                int bytesRead = read(mtimeFD, mtimeStr, sizeof(mtimeStr) - 1);
                 if (bytesRead < 0)
                 {
                     perror("read");
@@ -173,8 +172,8 @@ void computeHash(const char *filename, char *hash, time_t *mtime)
                 }
                 else
                 {
-                    mtime_str[bytesRead] = '\0';
-                    *mtime = atol(mtime_str);
+                    mtimeStr[bytesRead] = '\0';
+                    *mtime = atol(mtimeStr);
                 }
                 close(mtimeFD);
             }
@@ -184,8 +183,8 @@ void computeHash(const char *filename, char *hash, time_t *mtime)
             strcpy(hash, "ERROR: HASH COMPUTATION FAILED");
             *mtime = 0;
         }
-        remove(hash_file);
-        remove(mtime_file);
+        remove(hashFile);
+        remove(mtimeFile);
     }
     else
     {
@@ -222,72 +221,98 @@ void handleHashRequest(int clientSocket, const char *filename)
 
 void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind)
 {
-
     int index;
-    int *array;
-    int arraySize;
+    int *array = NULL;
+    int arraySize = 0;
 
     // Read the array from the file
     readArrayFromFile(filename, &array, &arraySize);
 
-    int sortPipe[2], searchPipe[2];
-    if (pipe(sortPipe) == -1 || pipe(searchPipe) == -1)
+    int sortPipe[2];
+    if (pipe(sortPipe) == -1)
     {
         perror("Pipe failed");
         close(clientSocket);
-        return NULL;
+        free(array);
+        return;
     }
 
     pid_t sortPid = fork();
-    if (sortPid == 0)
-    { // Sorting process
-        close(sortPipe[0]);
+    if (sortPid == -1)
+    {
+        perror("Fork failed");
+        close(clientSocket);
+        free(array);
+        return;
+    }
+    else if (sortPid == 0)
+    {                       // Child process: Sorting
+        close(sortPipe[0]); // Close unused read end
         sortArray(array, arraySize, sortAlgo);
         write(sortPipe[1], array, arraySize * sizeof(int));
-        close(sortPipe[1]);
+        close(sortPipe[1]); // Close write end after writing
         exit(0);
     }
 
-    pid_t searchPid = fork();
-    if (searchPid == 0)
-    { // Searching process
-        close(searchPipe[0]);
-        if (searchAlgo == 1)
-        { // Linear search can happen immediately
-            index = searchArray(array, arraySize, searchAlgo, keyToFind);
-        }
-        else
-        { // Other search algorithms wait for sorting to finish
-            int *sortedArray = (int *)malloc(arraySize * sizeof(int));
-            read(sortPipe[0], sortedArray, arraySize * sizeof(int));
-            close(sortPipe[0]);
-            index = searchArray(sortedArray, arraySize, searchAlgo, keyToFind);
-            free(sortedArray);
-        }
-        write(searchPipe[1], &index, sizeof(index));
-        close(searchPipe[1]);
-        exit(0);
-    }
+    // Parent process: Searching
+    close(sortPipe[1]); // Close unused write end
 
-    close(sortPipe[1]);
-    close(searchPipe[1]);
-
-    // Wait for both child processes to finish
+    // Wait for the sorting process to finish
     waitpid(sortPid, NULL, 0);
-    waitpid(searchPid, NULL, 0);
 
-    int sortedArray[arraySize];
+    int *sortedArray = (int *)malloc(arraySize * sizeof(int));
+    if (sortedArray == NULL)
+    {
+        perror("Malloc failed");
+        free(array);
+        close(clientSocket);
+        return;
+    }
+
     read(sortPipe[0], sortedArray, arraySize * sizeof(int));
-    read(searchPipe[0], &index, sizeof(index));
-    close(sortPipe[0]);
-    close(searchPipe[0]);
+    close(sortPipe[0]); // Close read end after reading
+
+    // Print the sorted array
+    printf("Sorted array in parent process:\n");
+    dispArray(sortedArray, arraySize);
+
+    // Perform the search
+    index = searchArray(sortedArray, arraySize, searchAlgo, keyToFind);
+
+    // Send the sorted array size first
+    if (write(clientSocket, &arraySize, sizeof(int)) < 0)
+    {
+        perror("Error sending array size to client");
+        free(array);
+        free(sortedArray);
+        close(clientSocket);
+        return;
+    }
 
     // Send the sorted array and the search result back to the client
-    send(clientSocket, sortedArray, arraySize * sizeof(int), 0);
-    send(clientSocket, &index, sizeof(index), 0);
+    if (write(clientSocket, sortedArray, arraySize * sizeof(int)) < 0)
+    {
+        perror("Error sending sorted array to client");
+        free(array);
+        free(sortedArray);
+        close(clientSocket);
+        return;
+    }
+
+    if (write(clientSocket, &index, sizeof(index)) < 0)
+    {
+        perror("Error sending index to client");
+        free(array);
+        free(sortedArray);
+        close(clientSocket);
+        return;
+    }
+
+    printf("Search result index: %d\n", index);
 
     close(clientSocket);
-    return NULL;
+    free(array);
+    free(sortedArray);
 }
 
 // Thread function to handle client requests
@@ -402,11 +427,18 @@ void readArrayFromFile(const char *fileName, int **array, int *arraySize)
         return;
     }
 
-    off_t fileSize = lseek(fd, 0, SEEK_END);
-    lseek(fd, 0, SEEK_SET);
+    struct stat st;
+    if (fstat(fd, &st) == -1)
+    {
+        perror("fstat error");
+        close(fd);
+        return;
+    }
 
+    off_t fileSize = st.st_size;
     *arraySize = fileSize / sizeof(int);
-    *array = (int *)malloc(*arraySize * sizeof(int));
+
+    *array = (int *)malloc(fileSize);
     if (!*array)
     {
         perror("Memory allocation error");
@@ -416,7 +448,7 @@ void readArrayFromFile(const char *fileName, int **array, int *arraySize)
 
     ssize_t bytesRead = 0;
     ssize_t totalBytesRead = 0;
-    while ((bytesRead = read(fd, *array + totalBytesRead / sizeof(int), FILE_CHUNK_SIZE)) > 0)
+    while ((bytesRead = read(fd, *array + totalBytesRead / sizeof(int), fileSize - totalBytesRead)) > 0)
     {
         totalBytesRead += bytesRead;
     }
@@ -424,6 +456,8 @@ void readArrayFromFile(const char *fileName, int **array, int *arraySize)
     if (bytesRead == -1)
     {
         perror("File read error");
+        free(*array);
+        *array = NULL;
     }
 
     close(fd);

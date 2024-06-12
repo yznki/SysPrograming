@@ -1,62 +1,26 @@
 #include <stdio.h>
-#include <pthread.h>
-#include <time.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <string.h>
-#include <sys/stat.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <time.h>
+#include <fcntl.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <openssl/sha.h>
 #include "../Common/utilities.h"
 
-#define FILE_SIZE_BYTES 0.005 * 1024 * 1024
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 1024
 
-void generateFile(const char *filename)
-{
-    srand(time(NULL));
-
-    // Large file generation.
-    int fd = open(filename, O_CREAT | O_WRONLY, 0644);
-
-    if (fd < 0)
-    {
-        perror("Error opening file");
-        exit(EXIT_FAILURE);
-    }
-
-    int totalWritten = 0;
-
-    while (totalWritten < FILE_SIZE_BYTES)
-    {
-        int randomNumber = rand() % 100 + 1;
-        char buffer[12];
-        int length = snprintf(buffer, sizeof(buffer), "%d ", randomNumber);
-
-        int bytesWritten = write(fd, buffer, length);
-
-        if (bytesWritten < 0)
-        {
-            perror("Error writing to file");
-            close(fd);
-            exit(EXIT_FAILURE);
-        }
-
-        totalWritten += bytesWritten;
-    }
-
-    close(fd);
-    printf("Random integers file created.\n");
-}
-
-void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char *keyToFind)
+void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, int keyToFind)
 {
     int sock;
     struct sockaddr_in serv_addr;
-    char buffer[BUFFER_SIZE];
+    char buffer[BUFFER_SIZE] = {0};
+    int *sortedArray;
+    int arraySize;
+    int index;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
@@ -75,107 +39,134 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
         return;
     }
 
-    snprintf(buffer, BUFFER_SIZE, "SORTSEARCH\n%s\n%c\n%c\n%s\n", filename, sortAlgo, searchAlgo, keyToFind);
-    // printf("Sending buffer: %s\n", buffer);
+    // Send the sort and search command
+    snprintf(buffer, BUFFER_SIZE, "SORTSEARCH\n%s\n%d\n%d\n%d\n", filename, sortAlgo, searchAlgo, keyToFind);
+    printf("Sending buffer: %s", buffer);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
-        perror("Error writing filename to socket");
+        perror("Error writing to socket");
         close(sock);
         return;
     }
 
-
-    int keyFound;
-    size_t arrSize;
-    if (read(sock, &arrSize, sizeof(size_t)) < 0)
+    // Receive the size of the sorted array
+    if (read(sock, &arraySize, sizeof(int)) < 0)
     {
         perror("Error reading array size from socket");
         close(sock);
         return;
     }
+    printf("Received array size: %d\n", arraySize);
 
-    printf("Read array size - %zu\n", arrSize);
-
-    int *sortedArr = malloc(sizeof(int) * arrSize);
-    if (!sortedArr)
+    // Allocate memory for the sorted array
+    sortedArray = (int *)malloc(arraySize * sizeof(int));
+    if (!sortedArray)
     {
-        perror("Error allocating memory for sorted array");
+        perror("Memory allocation error");
         close(sock);
         return;
     }
 
-    if (read(sock, sortedArr, sizeof(int) * arrSize) < 0)
+    // Receive the sorted array from the server
+    if (read(sock, sortedArray, sizeof(int) * arraySize) < 0)
     {
-        perror("Error reading sorted array from socket");
-        free(sortedArr);
+        perror("Error reading array from socket");
+        free(sortedArray);
         close(sock);
         return;
     }
 
-    write(sock, NULL, 0);
-
-    if (read(sock, &keyFound, sizeof(int)) < 0)
+    // Receive the index of the key from the server
+    if (read(sock, &index, sizeof(int)) < 0)
     {
-        perror("Error reading key index from socket");
-        free(sortedArr);
+        perror("Error reading index from socket");
+        free(sortedArray);
         close(sock);
         return;
     }
 
-    printf("The key - %d - is found at index: %d\n", atoi(keyToFind), keyFound);
     printf("Sorted array:\n");
-    dispArray(sortedArr, arrSize);
+    dispArray(sortedArray, arraySize);
 
-    free(sortedArr);
+    if (index >= 0)
+    {
+        printf("The key %d is found at index %d\n", keyToFind, index);
+    }
+    else
+    {
+        printf("The key %d is not found in the array\n", keyToFind);
+    }
+
+    free(sortedArray);
     close(sock);
 }
 
-int main(void)
+void createFileWithRandomIntegers(const char *filename, size_t sizeInBytes)
+{
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+    {
+        perror("File open error");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t numIntegers = sizeInBytes / sizeof(int);
+    int *array = (int *)malloc(FILE_CHUNK_SIZE * sizeof(int));
+    if (!array)
+    {
+        perror("Memory allocation error");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    size_t integersWritten = 0;
+    while (integersWritten < numIntegers)
+    {
+        size_t chunkSize = (numIntegers - integersWritten > FILE_CHUNK_SIZE) ? FILE_CHUNK_SIZE : (numIntegers - integersWritten);
+        for (size_t i = 0; i < chunkSize; i++)
+        {
+            array[i] = rand() % 100 + 1; // Generate random integers
+        }
+
+        if (write(fd, array, chunkSize * sizeof(int)) != chunkSize * sizeof(int))
+        {
+            perror("File write error");
+            free(array);
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        integersWritten += chunkSize;
+    }
+
+    free(array);
+    close(fd);
+}
+
+int main()
 {
 
-    const char *dirName = "ClientFiles";
-    struct stat st = {0};
+    srand(time(NULL));
 
-    // Check if directory exists
-    if (stat(dirName, &st) == -1)
-    {
-        // Directory does not exist, create it
-        if (mkdir(dirName, 0700))
-        {
-            perror("Error creating directory");
-        }
-    }
+    char filename[256] = "numbers.txt";
+    int sortAlgo, searchAlgo, keyToFind;
+    int sizeInBytes;
 
-    char filename[] = "ClientFiles/clientFileXXXXXX"; // Template for mkstemp
-    int fileFD = mkstemp(filename);
-    if (fileFD < 0)
-    {
-        perror("Error creating temporary file");
-        exit(EXIT_FAILURE);
-    }
-    close(fileFD);
+    printf("Enter the size of the array in MB: ");
+    scanf("%d", &sizeInBytes);
 
-    char sortAlgo;
-    printf("Enter desired sort algorithm:\n1. Bubble Sort\n2. Selection Sort\n3. Merge Sort\n4. Quick Sort\n5. Anything\n ->");
-    scanf(" %c", &sortAlgo);
-    getchar(); // Consume newline character
+    createFileWithRandomIntegers(filename, sizeInBytes);
 
-    char searchAlgo;
-    printf("Enter desired search algorithm:\n1. Linear Search\n2. Binary Search\n3. Jump Search\n4. Interpolation Search\n5. Anything\n ->");
-    scanf(" %c", &searchAlgo);
-    getchar(); // Consume newline character
+    printf("Enter the sorting algorithm (1: Bubble, 2: Selection, 3: Merge, 4: Quick): ");
+    scanf("%d", &sortAlgo);
 
-    char keyToFind[5];
-    printf("Enter desired key value to find: ");
-    if (fgets(keyToFind, sizeof(keyToFind), stdin) == NULL)
-    {
-        perror("Error reading keyToFind");
-        exit(EXIT_FAILURE);
-    }
-    keyToFind[strcspn(keyToFind, "\n")] = '\0'; // Remove newline character
+    printf("Enter the searching algorithm (1: Linear, 2: Binary, 3: Jump, 4: Interpolation): ");
+    scanf("%d", &searchAlgo);
 
-    generateFile(filename);
-    connectToServer(filename, sortAlgo, searchAlgo, keyToFind);
+    printf("Enter the key to find: ");
+    scanf("%d", &keyToFind);
+
+    sendFileForSortSearch(filename, sortAlgo, searchAlgo, keyToFind);
 
     return 0;
 }
