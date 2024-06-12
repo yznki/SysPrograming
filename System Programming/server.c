@@ -16,7 +16,8 @@
 #include "../Common/utilities.h"
 
 #define CACHE_SIZE 256
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
+#define FILE_CHUNK_SIZE 4096
 
 typedef struct
 {
@@ -39,6 +40,9 @@ void handleHashRequest(int clientSocket, const char *filename);
 void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind);
 void *handleClient(void *args);
 void runServer(int port);
+void sortArray(int *array, int size, int algorithm);
+int searchArray(int *array, int size, int algorithm, int target);
+void readArrayFromFile(const char *fileName, int **array, int *arraySize);
 
 int main(void)
 {
@@ -218,147 +222,72 @@ void handleHashRequest(int clientSocket, const char *filename)
 
 void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind)
 {
-    int fileFD;
-    ssize_t bytes_read;
-    char buffer[BUFFER_SIZE];
-    size_t current_size = 1024; // Initial buffer size
-    size_t arrSize = 0;
-    int *array = NULL;
 
-    fileFD = open(filename, O_RDONLY);
-    if (fileFD < 0)
+    int index;
+    int *array;
+    int arraySize;
+
+    // Read the array from the file
+    readArrayFromFile(filename, &array, &arraySize);
+
+    int sortPipe[2], searchPipe[2];
+    if (pipe(sortPipe) == -1 || pipe(searchPipe) == -1)
     {
-        perror("Error opening file");
-        return;
+        perror("Pipe failed");
+        close(clientSocket);
+        return NULL;
     }
 
-    array = (int *)malloc(current_size * sizeof(int));
-    if (!array)
-    {
-        perror("Error allocating memory for array");
-        close(fileFD);
-        return;
+    pid_t sortPid = fork();
+    if (sortPid == 0)
+    { // Sorting process
+        close(sortPipe[0]);
+        sortArray(array, arraySize, sortAlgo);
+        write(sortPipe[1], array, arraySize * sizeof(int));
+        close(sortPipe[1]);
+        exit(0);
     }
 
-    // Read the file contents and parse integers
-    while ((bytes_read = read(fileFD, buffer, BUFFER_SIZE - 1)) > 0)
-    {
-        buffer[bytes_read] = '\0'; // Null-terminate the buffer
-        char *token = strtok(buffer, " \n");
-        while (token != NULL)
-        {
-            if (arrSize >= current_size)
-            {
-                current_size *= 2;
-                array = (int *)realloc(array, current_size * sizeof(int));
-                if (!array)
-                {
-                    perror("Error reallocating memory for array");
-                    close(fileFD);
-                    return;
-                }
-            }
-            array[arrSize++] = atoi(token);
-            token = strtok(NULL, " \n");
+    pid_t searchPid = fork();
+    if (searchPid == 0)
+    { // Searching process
+        close(searchPipe[0]);
+        if (searchAlgo == 1)
+        { // Linear search can happen immediately
+            index = searchArray(array, arraySize, searchAlgo, keyToFind);
         }
-    }
-
-    if (bytes_read < 0)
-    {
-        perror("Error reading file");
-        free(array);
-        close(fileFD);
-        return;
-    }
-
-    close(fileFD);
-    dispArray(array, arrSize);
-    write(clientSocket, &arrSize, sizeof(int));
-
-    int fd[2];
-    if (pipe(fd))
-    {
-        perror("Unable to create pipe...");
-        return;
-    }
-
-    int pid = fork();
-    if (pid == 0)
-    {
-        // Child process for sorting
-        close(fd[0]); // Close reading end of the pipe in child process
-        switch (sortAlgo)
-        {
-        case 1:
-            bubbleSort(array, arrSize);
-            break;
-        case 2:
-            selectionSort(array, arrSize);
-            break;
-        case 3:
-            mergeSort(array, 0, arrSize - 1);
-            break;
-        case 4:
-            quickSort(array, 0, arrSize - 1);
-            printf("Child process: sorting completed using Quick Sort\n");
-            break;
-        default:
-            break;
+        else
+        { // Other search algorithms wait for sorting to finish
+            int *sortedArray = (int *)malloc(arraySize * sizeof(int));
+            read(sortPipe[0], sortedArray, arraySize * sizeof(int));
+            close(sortPipe[0]);
+            index = searchArray(sortedArray, arraySize, searchAlgo, keyToFind);
+            free(sortedArray);
         }
-        write(fd[1], array, sizeof(int) * arrSize);
-        close(fd[1]); // Close writing end of the pipe in child process
-        printf("Child process: data written to pipe\n");
-        write(clientSocket, array, sizeof(int) * arrSize);
-        printf("Child process: sorted array sent to client\n");
-        dispArray(array, arrSize);
-        free(array);
-        exit(0); // Ensure the child process exits after sorting
+        write(searchPipe[1], &index, sizeof(index));
+        close(searchPipe[1]);
+        exit(0);
     }
-    else if (pid > 0)
-    {
-        int indexOfKey;
 
-        switch (searchAlgo)
-        {
-        case 1:
-            indexOfKey = linearSearch(array, arrSize, keyToFind);
-            write(clientSocket, &indexOfKey, sizeof(int));
-            printf("Index at %d\n", indexOfKey);
-            return;
-        }
+    close(sortPipe[1]);
+    close(searchPipe[1]);
 
-        wait(NULL); // Wait for the child process to finish
+    // Wait for both child processes to finish
+    waitpid(sortPid, NULL, 0);
+    waitpid(searchPid, NULL, 0);
 
-        // Parent process for searching
-        close(fd[1]); // Close writing end of the pipe in parent process
-        int *sortedArray = malloc(sizeof(int) * arrSize);
-        read(fd[0], sortedArray, sizeof(int) * arrSize);
-        close(fd[0]); // Close reading end of the pipe in parent process
+    int sortedArray[arraySize];
+    read(sortPipe[0], sortedArray, arraySize * sizeof(int));
+    read(searchPipe[0], &index, sizeof(index));
+    close(sortPipe[0]);
+    close(searchPipe[0]);
 
-        switch (searchAlgo)
-        {
-        case 2:
-            indexOfKey = binarySearch(sortedArray, arrSize, keyToFind);
-            break;
-        case 3:
-            indexOfKey = jumpSearch(sortedArray, arrSize, keyToFind);
-            break;
-        case 4:
-            indexOfKey = interpolationSearch(sortedArray, arrSize, keyToFind);
-            break;
-        default:
-            indexOfKey = -1; // Invalid search algorithm
-            break;
-        }
-        write(clientSocket, &indexOfKey, sizeof(int));
-        printf("Index at %d\n", indexOfKey);
-        free(sortedArray); // Free allocated memory
-    }
-    else
-    {
-        perror("Unable to create child process\n");
-        free(array);
-    }
+    // Send the sorted array and the search result back to the client
+    send(clientSocket, sortedArray, arraySize * sizeof(int), 0);
+    send(clientSocket, &index, sizeof(index), 0);
+
+    close(clientSocket);
+    return NULL;
 }
 
 // Thread function to handle client requests
@@ -400,7 +329,6 @@ void *handleClient(void *args)
     // Handle the command
     if (strcmp(command, "HASH") == 0)
     {
-        printf("%s\n", filename);
         handleHashRequest(clientSocket, filename);
     }
     else if (strcmp(command, "SORTSEARCH") == 0)
@@ -418,6 +346,87 @@ void *handleClient(void *args)
     // Close the client socket
     close(clientSocket);
     return NULL;
+}
+
+void sortArray(int *array, int size, int algorithm)
+{
+    switch (algorithm)
+    {
+    case 1: // Bubble sort
+        bubbleSort(array, size);
+        break;
+    case 2: // Selection sort
+        selectionSort(array, size);
+        break;
+    case 3: // Merge sort
+        mergeSort(array, 0, size - 1);
+        break;
+    case 4: // Quick sort
+        quickSort(array, 0, size - 1);
+        break;
+    default:
+        printf("Unknown sorting algorithm\n");
+    }
+}
+
+int searchArray(int *array, int size, int algorithm, int target)
+{
+    int index;
+    switch (algorithm)
+    {
+    case 1:
+        index = linearSearch(array, size, target);
+        break;
+    case 2:
+        index = binarySearch(array, size, target);
+        break;
+    case 3:
+        index = jumpSearch(array, size, target);
+        break;
+    case 4:
+        index = interpolationSearch(array, size, target);
+        break;
+    default:
+        printf("Unknown search algorithm\n");
+        index = -1;
+    }
+    return index;
+}
+
+void readArrayFromFile(const char *fileName, int **array, int *arraySize)
+{
+    int fd = open(fileName, O_RDONLY);
+    if (fd == -1)
+    {
+        perror("File open error");
+        return;
+    }
+
+    off_t fileSize = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+
+    *arraySize = fileSize / sizeof(int);
+    *array = (int *)malloc(*arraySize * sizeof(int));
+    if (!*array)
+    {
+        perror("Memory allocation error");
+        close(fd);
+        return;
+    }
+
+    ssize_t bytesRead = 0;
+    ssize_t totalBytesRead = 0;
+    while ((bytesRead = read(fd, *array + totalBytesRead / sizeof(int), FILE_CHUNK_SIZE)) > 0)
+    {
+        totalBytesRead += bytesRead;
+    }
+
+    if (bytesRead == -1)
+    {
+        perror("File read error");
+    }
+
+    close(fd);
 }
 
 // Function to run the server

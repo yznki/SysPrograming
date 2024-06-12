@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -12,7 +13,7 @@
 #include "../Common/utilities.h"
 
 #define FILE_SIZE_BYTES 0.005 * 1024 * 1024
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 
 void generateFile(const char *filename)
 {
@@ -86,7 +87,7 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
 
     int keyFound;
     size_t arrSize;
-    if (read(sock, &arrSize, sizeof(int)) < 0)
+    if (read(sock, &arrSize, sizeof(size_t)) < 0)
     {
         perror("Error reading array size from socket");
         close(sock);
@@ -131,6 +132,20 @@ void connectToServer(const char *filename, char sortAlgo, char searchAlgo, char 
 
 int main(void)
 {
+
+    const char *dirName = "ClientFiles";
+    struct stat st = {0};
+
+    // Check if directory exists
+    if (stat(dirName, &st) == -1)
+    {
+        // Directory does not exist, create it
+        if (mkdir(dirName, 0700))
+        {
+            perror("Error creating directory");
+        }
+    }
+
     char filename[] = "ClientFiles/clientFileXXXXXX"; // Template for mkstemp
     int fileFD = mkstemp(filename);
     if (fileFD < 0)
