@@ -75,6 +75,19 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
         close(sock);
         return;
     }
+    printf("Received sorted array from server\n");
+
+    int fastestSort = 0, fastestSearch = 0;
+
+    // Read Fastest Sort
+    if (read(sock, &fastestSort, sizeof(int)) < 0)
+    {
+        perror("Error reading fastest sort algo from socket");
+        free(sortedArray);
+        close(sock);
+        return;
+    }
+    printf("Received fastest sorting algorithm from server\n");
 
     // Receive the index of the key from the server
     if (read(sock, &index, sizeof(int)) < 0)
@@ -84,6 +97,17 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
         close(sock);
         return;
     }
+    printf("Received search result index from server\n");
+
+    // Read Fastest Search
+    if (read(sock, &fastestSearch, sizeof(int)) < 0)
+    {
+        perror("Error reading fastest search algo from socket");
+        free(sortedArray);
+        close(sock);
+        return;
+    }
+    printf("Received fastest searching algorithm from server\n");
 
     printf("Sorted array:\n");
     dispArray(sortedArray, arraySize);
@@ -95,6 +119,50 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
     else
     {
         printf("The key %d is not found in the array\n", keyToFind);
+    }
+
+    if (sortAlgo == 5)
+    {
+        switch (fastestSort)
+        {
+        case 1:
+            printf("Bubble Sort was the Fastest\n");
+            break;
+        case 2:
+            printf("Selection Sort was the Fastest\n");
+            break;
+        case 3:
+            printf("Merge Sort was the Fastest\n");
+            break;
+        case 4:
+            printf("Quick Sort was the Fastest\n");
+            break;
+        default:
+            perror("Fastest Algo Error.\n");
+            break;
+        }
+    }
+
+    if (searchAlgo == 5)
+    {
+        switch (fastestSearch)
+        {
+        case 1:
+            printf("Linear Search was the Fastest\n");
+            break;
+        case 2:
+            printf("Binary Search was the Fastest\n");
+            break;
+        case 3:
+            printf("Jump Search was the Fastest\n");
+            break;
+        case 4:
+            printf("Interpolation Search was the Fastest\n");
+            break;
+        default:
+            perror("Fastest Algo Error.\n");
+            break;
+        }
     }
 
     free(sortedArray);
@@ -152,15 +220,15 @@ int main()
     int sortAlgo, searchAlgo, keyToFind;
     int sizeInBytes;
 
-    printf("Enter the size of the array in MB: ");
+    printf("Enter the size: ");
     scanf("%d", &sizeInBytes);
 
     createFileWithRandomIntegers(filename, sizeInBytes);
 
-    printf("Enter the sorting algorithm (1: Bubble, 2: Selection, 3: Merge, 4: Quick): ");
+    printf("Enter the sorting algorithm (1: Bubble, 2: Selection, 3: Merge, 4: Quick, 5: Any): ");
     scanf("%d", &sortAlgo);
 
-    printf("Enter the searching algorithm (1: Linear, 2: Binary, 3: Jump, 4: Interpolation): ");
+    printf("Enter the searching algorithm (1: Linear, 2: Binary, 3: Jump, 4: Interpolation, 5: Any): ");
     scanf("%d", &searchAlgo);
 
     printf("Enter the key to find: ");

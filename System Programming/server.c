@@ -25,6 +25,30 @@ typedef struct
     time_t mtime; // Last modification time
 } HashCache;
 
+typedef struct
+{
+    int *array;
+    int size;
+    int algorithm;
+    int *finished;
+    int *fastestAlgorithm;
+    pthread_mutex_t *mutex;
+    pthread_cond_t *cond;
+} SortArgs;
+
+typedef struct
+{
+    int *array;
+    int size;
+    int algorithm;
+    int target;
+    int *found;
+    int *index;
+    int *fastestAlgorithm; 
+    pthread_mutex_t *mutex;
+    pthread_cond_t *cond;
+} SearchArgs;
+
 HashCache hashCache[CACHE_SIZE];
 int hashCacheSize = 0;
 pthread_mutex_t cacheLock = PTHREAD_MUTEX_INITIALIZER;
@@ -39,9 +63,10 @@ void handleHashRequest(int clientSocket, const char *filename);
 void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlgo, int searchAlgo, int keyToFind);
 void *handleClient(void *args);
 void runServer(int port);
-void sortArray(int *array, int size, int algorithm);
-int searchArray(int *array, int size, int algorithm, int target);
+void sortArray(int *array, int size, int *algorithm);
+int searchArray(int *array, int size, int *algorithm, int target);
 void readArrayFromFile(const char *fileName, int **array, int *arraySize);
+void *sort(void *args);
 
 int main(void)
 {
@@ -228,6 +253,9 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     // Read the array from the file
     readArrayFromFile(filename, &array, &arraySize);
 
+    printf("Read Array from file: \n");
+    dispArray(array, arraySize);
+
     int sortPipe[2];
     if (pipe(sortPipe) == -1)
     {
@@ -238,24 +266,26 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     }
 
     pid_t sortPid = fork();
-    if (sortPid == -1)
+    if (sortPid == 0)
     {
-        perror("Fork failed");
-        close(clientSocket);
-        free(array);
-        return;
-    }
-    else if (sortPid == 0)
-    {                       // Child process: Sorting
         close(sortPipe[0]); // Close unused read end
-        sortArray(array, arraySize, sortAlgo);
+        
+        sortArray(array, arraySize, &sortAlgo);
         write(sortPipe[1], array, arraySize * sizeof(int));
+
+        write(sortPipe[1], &sortAlgo, sizeof(sortAlgo));
+
         close(sortPipe[1]); // Close write end after writing
         exit(0);
     }
+    else if (sortPid < 0)
+    {
+        perror("Unable to create child.\n");
+        return;
+    }
 
-    // Parent process: Searching
-    close(sortPipe[1]); // Close unused write end
+    // Searching
+    close(sortPipe[1]);
 
     // Wait for the sorting process to finish
     waitpid(sortPid, NULL, 0);
@@ -270,14 +300,14 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     }
 
     read(sortPipe[0], sortedArray, arraySize * sizeof(int));
+    read(sortPipe[0], &sortAlgo, sizeof(sortAlgo));
     close(sortPipe[0]); // Close read end after reading
 
-    // Print the sorted array
-    printf("Sorted array in parent process:\n");
+    printf("Sorted Array: \n");
     dispArray(sortedArray, arraySize);
 
     // Perform the search
-    index = searchArray(sortedArray, arraySize, searchAlgo, keyToFind);
+    index = searchArray(sortedArray, arraySize, &searchAlgo, keyToFind);
 
     // Send the sorted array size first
     if (write(clientSocket, &arraySize, sizeof(int)) < 0)
@@ -288,6 +318,7 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
+    printf("Sent array size to client: %d\n", arraySize);
 
     // Send the sorted array and the search result back to the client
     if (write(clientSocket, sortedArray, arraySize * sizeof(int)) < 0)
@@ -298,6 +329,21 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
+    printf("Sent sorted array to client\n");
+
+    printf("Fastest Sort Algorithm: %d\n", sortAlgo);
+    printf("Search Algorithm: %d\n", searchAlgo);
+
+    // Fastest Sorting Algo
+    if (write(clientSocket, &sortAlgo, sizeof(int)) < 0)
+    {
+        perror("Error sending fastest sort algo to client");
+        free(array);
+        free(sortedArray);
+        close(clientSocket);
+        return;
+    }
+    printf("Sent fastest sorting algorithm to client\n");
 
     if (write(clientSocket, &index, sizeof(index)) < 0)
     {
@@ -307,6 +353,18 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
+    printf("Sent search result index to client\n");
+
+    // Fastest Searching Algo
+    if (write(clientSocket, &searchAlgo, sizeof(int)) < 0)
+    {
+        perror("Error sending fastest search algo to client");
+        free(array);
+        free(sortedArray);
+        close(clientSocket);
+        return;
+    }
+    printf("Sent fastest searching algorithm to client\n");
 
     printf("Search result index: %d\n", index);
 
@@ -373,9 +431,61 @@ void *handleClient(void *args)
     return NULL;
 }
 
-void sortArray(int *array, int size, int algorithm)
+void *sort(void *args)
 {
-    switch (algorithm)
+    SortArgs *sortArgs = (SortArgs *)args;
+
+    int *localArray = malloc(sortArgs->size * sizeof(int));
+    if (!localArray)
+    {
+        perror("Failed to allocate memory");
+        pthread_exit(NULL);
+    }
+
+    for (int i = 0; i < sortArgs->size; i++)
+    {
+        localArray[i] = sortArgs->array[i];
+    }
+
+    switch (sortArgs->algorithm)
+    {
+    case 1:
+        bubbleSort(localArray, sortArgs->size);
+        break;
+    case 2:
+        selectionSort(localArray, sortArgs->size);
+        break;
+    case 3:
+        mergeSort(localArray, 0, sortArgs->size - 1);
+        break;
+    case 4:
+        quickSort(localArray, 0, sortArgs->size - 1);
+        break;
+    }
+
+    pthread_mutex_lock(sortArgs->mutex);
+    if (*(sortArgs->finished) == 0)
+    {
+        printf("Thread %d finished first\n", sortArgs->algorithm);
+        for (int i = 0; i < sortArgs->size; i++)
+        {
+            sortArgs->array[i] = localArray[i];
+        }
+        *(sortArgs->finished) = 1;
+        *(sortArgs->fastestAlgorithm) = sortArgs->algorithm; // Set the fastest algorithm
+        pthread_cond_signal(sortArgs->cond);
+    }
+    pthread_mutex_unlock(sortArgs->mutex);
+
+    free(localArray);
+    return NULL;
+}
+
+void sortArray(int *array, int size, int *algorithm)
+{
+    static int fastestSortAlgorithm = 0; // Static to keep track of fastest algorithm across calls
+
+    switch (*algorithm)
     {
     case 1: // Bubble sort
         bubbleSort(array, size);
@@ -389,15 +499,106 @@ void sortArray(int *array, int size, int algorithm)
     case 4: // Quick sort
         quickSort(array, 0, size - 1);
         break;
+    case 5:
+    { // Fastest Sorting Algo
+        pthread_t threads[4];
+        SortArgs args[4];
+        pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+        pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+        int finished = 0;
+
+        // Initialize thread arguments
+        for (int i = 0; i < 4; i++)
+        {
+            args[i].array = array; // Use the shared array
+            args[i].size = size;
+            args[i].algorithm = i + 1;
+            args[i].finished = &finished;
+            args[i].fastestAlgorithm = &fastestSortAlgorithm; // Pass the pointer
+            args[i].mutex = &mutex;
+            args[i].cond = &cond;
+        }
+
+        // Create threads
+        for (int i = 0; i < 4; i++)
+        {
+            if (pthread_create(&threads[i], NULL, sort, &args[i]) != 0)
+            {
+                perror("Failed to create thread");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        // Wait for the first thread to finish
+        pthread_mutex_lock(&mutex);
+        while (!finished)
+        {
+            pthread_cond_wait(&cond, &mutex);
+        }
+        pthread_mutex_unlock(&mutex);
+
+        // Cancel other threads and ensure they are terminated properly
+        for (int i = 0; i < 4; i++)
+        {
+            pthread_cancel(threads[i]);
+            pthread_join(threads[i], NULL); // Ensure threads have terminated
+        }
+
+        pthread_mutex_destroy(&mutex);
+        pthread_cond_destroy(&cond);
+        break;
+    }
     default:
         printf("Unknown sorting algorithm\n");
     }
+
+    printf("Fastest Algo: %d\n", fastestSortAlgorithm);
+
+    *algorithm = fastestSortAlgorithm;
 }
 
-int searchArray(int *array, int size, int algorithm, int target)
+void *search(void *args)
 {
+    SearchArgs *searchArgs = (SearchArgs *)args;
+
+    int localIndex = -1;
+
+    switch (searchArgs->algorithm)
+    {
+    case 1:
+        localIndex = linearSearch(searchArgs->array, searchArgs->size, searchArgs->target);
+        break;
+    case 2:
+        localIndex = binarySearch(searchArgs->array, searchArgs->size, searchArgs->target);
+        break;
+    case 3:
+        localIndex = jumpSearch(searchArgs->array, searchArgs->size, searchArgs->target);
+        break;
+    case 4:
+        localIndex = interpolationSearch(searchArgs->array, searchArgs->size, searchArgs->target);
+        break;
+    }
+
+    pthread_mutex_lock(searchArgs->mutex);
+    if (*(searchArgs->found) == 0 && localIndex != -1)
+    {
+        printf("Thread %d found the target first at index %d\n", searchArgs->algorithm, localIndex);
+        *(searchArgs->index) = localIndex;
+        *(searchArgs->found) = 1;
+        *(searchArgs->fastestAlgorithm) = searchArgs->algorithm;
+        pthread_cond_signal(searchArgs->cond);
+    }
+    pthread_mutex_unlock(searchArgs->mutex);
+
+    return NULL;
+}
+
+int searchArray(int *array, int size, int *algorithm, int target)
+{
+    static int fastestSearchAlgorithm = 0;
+
     int index;
-    switch (algorithm)
+    switch (*algorithm)
     {
     case 1:
         index = linearSearch(array, size, target);
@@ -411,10 +612,65 @@ int searchArray(int *array, int size, int algorithm, int target)
     case 4:
         index = interpolationSearch(array, size, target);
         break;
+    case 5:
+    { // Fastest Search Algorithm
+        pthread_t threads[4];
+        SearchArgs args[4];
+        pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+        pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+        int found = 0;
+        int foundIndex = -1;
+
+        // Initialize thread arguments
+        for (int i = 0; i < 4; i++)
+        {
+            args[i].array = array;
+            args[i].size = size;
+            args[i].algorithm = i + 1;
+            args[i].target = target;
+            args[i].found = &found;
+            args[i].index = &foundIndex;
+            args[i].fastestAlgorithm = &fastestSearchAlgorithm; 
+            args[i].mutex = &mutex;
+            args[i].cond = &cond;
+        }
+
+        // Create threads
+        for (int i = 0; i < 4; i++)
+        {
+            if (pthread_create(&threads[i], NULL, search, &args[i]) != 0)
+            {
+                perror("Failed to create thread");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        // Wait for the first thread to find the target
+        pthread_mutex_lock(&mutex);
+        while (!found)
+        {
+            pthread_cond_wait(&cond, &mutex);
+        }
+        pthread_mutex_unlock(&mutex);
+
+        // Cancel other threads and ensure they are terminated properly
+        for (int i = 0; i < 4; i++)
+        {
+            pthread_cancel(threads[i]);
+            pthread_join(threads[i], NULL); // Ensure threads have terminated
+        }
+
+        pthread_mutex_destroy(&mutex);
+        pthread_cond_destroy(&cond);
+        index = foundIndex;
+        break;
+    }
     default:
         printf("Unknown search algorithm\n");
         index = -1;
     }
+
+    *algorithm = fastestSearchAlgorithm;
     return index;
 }
 
@@ -509,7 +765,7 @@ void runServer(int port)
             continue;
         }
 
-        printf("Accepted new connection\n");
+        printf("\n\n\n\nAccepted new connection\n");
 
         pthread_t thread_id;
         if (pthread_create(&thread_id, NULL, handleClient, (void *)newSocket) != 0)
