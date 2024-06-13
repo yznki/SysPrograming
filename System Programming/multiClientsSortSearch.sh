@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Number of clients to run simultaneously
-NUM_CLIENTS=10
+NUM_CLIENTS=50
 
 # Path to the client executable
 CLIENT_EXEC="./clientSortSearch.o"
