@@ -13,6 +13,39 @@
 
 #define BUFFER_SIZE 1024
 
+ssize_t readFull(int sockfd, void *buf, size_t len)
+{
+    size_t total = 0;
+    ssize_t n;
+
+    while (total < len)
+    {
+        n = read(sockfd, buf + total, len - total);
+        if (n <= 0)
+            return n;
+        total += n;
+    }
+    return total;
+}
+
+int readDataInChunks(int fd, void *data, size_t dataSize)
+{
+    size_t totalRead = 0;
+    size_t chunkSize = 4096; // 4KB chunks
+    while (totalRead < dataSize)
+    {
+        size_t bytesToRead = (dataSize - totalRead > chunkSize) ? chunkSize : (dataSize - totalRead);
+        ssize_t readBytes = read(fd, (char *)data + totalRead, bytesToRead);
+        if (readBytes < 0)
+        {
+            perror("read");
+            return -1;
+        }
+        totalRead += readBytes;
+    }
+    return 0;
+}
+
 void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, int keyToFind)
 {
     int sock;
@@ -41,7 +74,7 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
 
     // Send the sort and search command
     snprintf(buffer, BUFFER_SIZE, "SORTSEARCH\n%s\n%d\n%d\n%d\n", filename, sortAlgo, searchAlgo, keyToFind);
-    printf("Sending buffer: %s", buffer);
+    // printf("Sending buffer: %s", buffer);
     if (write(sock, buffer, strlen(buffer)) < 0)
     {
         perror("Error writing to socket");
@@ -49,14 +82,15 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
         return;
     }
 
+
+
     // Receive the size of the sorted array
-    if (read(sock, &arraySize, sizeof(int)) < 0)
+    if (readFull(sock, &arraySize, sizeof(int)) < 0)
     {
         perror("Error reading array size from socket");
         close(sock);
         return;
     }
-    printf("Received array size: %d\n", arraySize);
 
     // Allocate memory for the sorted array
     sortedArray = (int *)malloc(arraySize * sizeof(int));
@@ -68,46 +102,42 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
     }
 
     // Receive the sorted array from the server
-    if (read(sock, sortedArray, sizeof(int) * arraySize) < 0)
+    if (readDataInChunks(sock, sortedArray, sizeof(int) * arraySize) < 0)
     {
         perror("Error reading array from socket");
         free(sortedArray);
         close(sock);
         return;
     }
-    printf("Received sorted array from server\n");
 
     int fastestSort = 0, fastestSearch = 0;
 
     // Read Fastest Sort
-    if (read(sock, &fastestSort, sizeof(int)) < 0)
+    if (readFull(sock, &fastestSort, sizeof(int)) < 0)
     {
         perror("Error reading fastest sort algo from socket");
         free(sortedArray);
         close(sock);
         return;
     }
-    printf("Received fastest sorting algorithm from server\n");
 
     // Receive the index of the key from the server
-    if (read(sock, &index, sizeof(int)) < 0)
+    if (readFull(sock, &index, sizeof(int)) < 0)
     {
         perror("Error reading index from socket");
         free(sortedArray);
         close(sock);
         return;
     }
-    printf("Received search result index from server\n");
 
     // Read Fastest Search
-    if (read(sock, &fastestSearch, sizeof(int)) < 0)
+    if (readFull(sock, &fastestSearch, sizeof(int)) < 0)
     {
         perror("Error reading fastest search algo from socket");
         free(sortedArray);
         close(sock);
         return;
     }
-    printf("Received fastest searching algorithm from server\n");
 
     printf("Sorted array:\n");
     dispArray(sortedArray, arraySize);
@@ -167,6 +197,7 @@ void sendFileForSortSearch(const char *filename, int sortAlgo, int searchAlgo, i
 
     free(sortedArray);
     close(sock);
+    printf("Client finished processing.\n");
 }
 
 void createFileWithRandomIntegers(const char *filename, size_t sizeInBytes)
@@ -214,14 +245,20 @@ void createFileWithRandomIntegers(const char *filename, size_t sizeInBytes)
 int main()
 {
 
-    srand(time(NULL));
+    // srand(time(NULL));
 
     char filename[256] = "numbers.txt";
     int sortAlgo, searchAlgo, keyToFind;
     int sizeInBytes;
 
-    printf("Enter the size: ");
+    printf("Enter the size (maximum 65000): ");
     scanf("%d", &sizeInBytes);
+
+    if (sizeInBytes > 65000)
+    {
+        printf("Too large of a size.\n");
+        return 0;
+    }
 
     createFileWithRandomIntegers(filename, sizeInBytes);
 

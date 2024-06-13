@@ -54,6 +54,59 @@ int hashCacheSize = 0;
 pthread_mutex_t cacheLock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t hashLock = PTHREAD_MUTEX_INITIALIZER;
 
+ssize_t writeFull(int sockfd, const void *buf, size_t len)
+{
+    size_t total = 0;
+    ssize_t n;
+
+    while (total < len)
+    {
+        n = write(sockfd, buf + total, len - total);
+        if (n <= 0)
+            return n;
+        total += n;
+    }
+    return total;
+}
+
+int writeDataInChunks(int fd, void *data, size_t dataSize)
+{
+    size_t totalWritten = 0;
+    size_t chunkSize = 4096; // 4KB chunks
+    while (totalWritten < dataSize)
+    {
+        size_t bytesToWrite = (dataSize - totalWritten > chunkSize) ? chunkSize : (dataSize - totalWritten);
+        ssize_t written = write(fd, (char *)data + totalWritten, bytesToWrite);
+        if (written < 0)
+        {
+            perror("write");
+            return -1;
+        }
+        totalWritten += written;
+    }
+
+    return 0;
+}
+
+int readDataInChunks(int fd, void *data, size_t dataSize)
+{
+    size_t totalRead = 0;
+    size_t chunkSize = 4096; // 4KB chunks
+    while (totalRead < dataSize)
+    {
+        size_t bytesToRead = (dataSize - totalRead > chunkSize) ? chunkSize : (dataSize - totalRead);
+        ssize_t readBytes = read(fd, (char *)data + totalRead, bytesToRead);
+        if (readBytes < 0)
+        {
+            perror("read");
+            return -1;
+        }
+        totalRead += readBytes;
+    }
+    
+    return 0;
+}
+
 // Function Declarations
 int findHash(const char *filename, char *hash, time_t *mtime);
 void addHash(const char *filename, const char *hash, time_t mtime);
@@ -256,6 +309,8 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     printf("Read Array from file: \n");
     dispArray(array, arraySize);
 
+    // printf("The array's size is: %d\n", arraySize);
+
     int sortPipe[2];
     if (pipe(sortPipe) == -1)
     {
@@ -271,10 +326,8 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(sortPipe[0]); // Close unused read end
         
         sortArray(array, arraySize, &sortAlgo);
-        write(sortPipe[1], array, arraySize * sizeof(int));
-
-        write(sortPipe[1], &sortAlgo, sizeof(sortAlgo));
-
+        writeDataInChunks(sortPipe[1], array, arraySize * sizeof(int));
+        writeFull(sortPipe[1], &sortAlgo, sizeof(sortAlgo));
         close(sortPipe[1]); // Close write end after writing
         exit(0);
     }
@@ -299,7 +352,7 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         return;
     }
 
-    read(sortPipe[0], sortedArray, arraySize * sizeof(int));
+    readDataInChunks(sortPipe[0], sortedArray, arraySize * sizeof(int));
     read(sortPipe[0], &sortAlgo, sizeof(sortAlgo));
     close(sortPipe[0]); // Close read end after reading
 
@@ -307,10 +360,11 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
     dispArray(sortedArray, arraySize);
 
     // Perform the search
+
     index = searchArray(sortedArray, arraySize, &searchAlgo, keyToFind);
 
     // Send the sorted array size first
-    if (write(clientSocket, &arraySize, sizeof(int)) < 0)
+    if (writeFull(clientSocket, &arraySize, sizeof(int)) < 0)
     {
         perror("Error sending array size to client");
         free(array);
@@ -318,10 +372,9 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
-    printf("Sent array size to client: %d\n", arraySize);
 
     // Send the sorted array and the search result back to the client
-    if (write(clientSocket, sortedArray, arraySize * sizeof(int)) < 0)
+    if (writeDataInChunks(clientSocket, sortedArray, arraySize * sizeof(int)) < 0)
     {
         perror("Error sending sorted array to client");
         free(array);
@@ -329,13 +382,9 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
-    printf("Sent sorted array to client\n");
-
-    printf("Fastest Sort Algorithm: %d\n", sortAlgo);
-    printf("Search Algorithm: %d\n", searchAlgo);
 
     // Fastest Sorting Algo
-    if (write(clientSocket, &sortAlgo, sizeof(int)) < 0)
+    if (writeFull(clientSocket, &sortAlgo, sizeof(int)) < 0)
     {
         perror("Error sending fastest sort algo to client");
         free(array);
@@ -343,9 +392,8 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
-    printf("Sent fastest sorting algorithm to client\n");
 
-    if (write(clientSocket, &index, sizeof(index)) < 0)
+    if (writeFull(clientSocket, &index, sizeof(index)) < 0)
     {
         perror("Error sending index to client");
         free(array);
@@ -353,10 +401,9 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
-    printf("Sent search result index to client\n");
 
     // Fastest Searching Algo
-    if (write(clientSocket, &searchAlgo, sizeof(int)) < 0)
+    if (writeFull(clientSocket, &searchAlgo, sizeof(int)) < 0)
     {
         perror("Error sending fastest search algo to client");
         free(array);
@@ -364,13 +411,13 @@ void handleSortSearchRequest(const char *filename, int clientSocket, int sortAlg
         close(clientSocket);
         return;
     }
-    printf("Sent fastest searching algorithm to client\n");
 
     printf("Search result index: %d\n", index);
 
     close(clientSocket);
     free(array);
     free(sortedArray);
+    printf("Server finished processing request.\n");
 }
 
 // Thread function to handle client requests
@@ -466,7 +513,7 @@ void *sort(void *args)
     pthread_mutex_lock(sortArgs->mutex);
     if (*(sortArgs->finished) == 0)
     {
-        printf("Thread %d finished first\n", sortArgs->algorithm);
+        // printf("Thread %d finished first\n", sortArgs->algorithm);
         for (int i = 0; i < sortArgs->size; i++)
         {
             sortArgs->array[i] = localArray[i];
@@ -562,6 +609,7 @@ void *search(void *args)
     SearchArgs *searchArgs = (SearchArgs *)args;
 
     int localIndex = -1;
+    // printf("Thread %d starting search.\n", searchArgs->algorithm);
 
     switch (searchArgs->algorithm)
     {
@@ -579,13 +627,20 @@ void *search(void *args)
         break;
     }
 
+    // printf("Thread %d search completed. Local index: %d\n", searchArgs->algorithm, localIndex);
+
     pthread_mutex_lock(searchArgs->mutex);
     if (*(searchArgs->found) == 0 && localIndex != -1)
     {
-        printf("Thread %d found the target first at index %d\n", searchArgs->algorithm, localIndex);
+        // printf("Thread %d found the target first at index %d\n", searchArgs->algorithm, localIndex);
         *(searchArgs->index) = localIndex;
         *(searchArgs->found) = 1;
         *(searchArgs->fastestAlgorithm) = searchArgs->algorithm;
+        pthread_cond_signal(searchArgs->cond);
+    }
+    else if (*(searchArgs->found) == 0)
+    {
+        *(searchArgs->found) = 1;
         pthread_cond_signal(searchArgs->cond);
     }
     pthread_mutex_unlock(searchArgs->mutex);
@@ -598,6 +653,7 @@ int searchArray(int *array, int size, int *algorithm, int target)
     static int fastestSearchAlgorithm = 0;
 
     int index;
+    // printf("Starting search with algorithm %d\n", *algorithm);
     switch (*algorithm)
     {
     case 1:
@@ -620,6 +676,7 @@ int searchArray(int *array, int size, int *algorithm, int target)
         pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
         int found = 0;
         int foundIndex = -1;
+        int completed = 0; // Track number of completed threads
 
         // Initialize thread arguments
         for (int i = 0; i < 4; i++)
@@ -633,6 +690,7 @@ int searchArray(int *array, int size, int *algorithm, int target)
             args[i].fastestAlgorithm = &fastestSearchAlgorithm; 
             args[i].mutex = &mutex;
             args[i].cond = &cond;
+            // printf("Initializing search thread %d\n", i + 1);
         }
 
         // Create threads
@@ -645,11 +703,12 @@ int searchArray(int *array, int size, int *algorithm, int target)
             }
         }
 
-        // Wait for the first thread to find the target
+        // Wait for the first thread to find the target or all threads to complete
         pthread_mutex_lock(&mutex);
-        while (!found)
+        while (!found && completed < 4)
         {
             pthread_cond_wait(&cond, &mutex);
+            completed++;
         }
         pthread_mutex_unlock(&mutex);
 
@@ -670,6 +729,7 @@ int searchArray(int *array, int size, int *algorithm, int target)
         index = -1;
     }
 
+    printf("Fastest search algorithm: %d, Index found: %d\n", fastestSearchAlgorithm, index);
     *algorithm = fastestSearchAlgorithm;
     return index;
 }
