@@ -247,7 +247,7 @@ int main()
 
     // srand(time(NULL));
 
-    char filename[256] = "numbers.txt";
+    char filename[256] = "numbers.bin";
     int sortAlgo, searchAlgo, keyToFind;
     int sizeInBytes;
 
